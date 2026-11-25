@@ -65,7 +65,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>تقرير ضيافة اليومي <span style="font-size:11px;color:var(--dim)">v4.2</span></h1>
+  <h1>تقرير ضيافة اليومي <span style="font-size:11px;color:var(--dim)">v4.3</span></h1>
   <div class="sub">ارفع صورة تقرير نهاية اليوم وصورة شاشة Summary Sales، راجع الأرقام، وانسخ التقرير جاهز.</div>
 
   <div class="card">
@@ -910,17 +910,42 @@ async function geminiRead(key){
   let list=await listFlashModels();
   diagPush("models available: "+(list.length?list.join(", "):"(list failed, using backup names)"));
   for(const m of GEMINI_MODELS) if(!list.includes(m)) list.push(m);
-  let res=null;
+  let res=null, lastRetryable=null;
+  const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+  const BUDGET=(typeof window.__DF_GEMINI_BUDGET==="number")?window.__DF_GEMINI_BUDGET:60000;
+  const t0=Date.now();
+  // جرب كل موديل بحد أقصى ٣ محاولات مع استراحة (جوجل بيرجع 503 لما يكون مشغول)، وبعدها الموديل اللي بعده
+  outer:
   for(const model of list){
-    const url="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent";
-    res=await fetch(url,{method:"POST",headers:GHEADERS(key),body:JSON.stringify(body)});
-    if(res.ok){ diagPush("gemini model: "+model); break; }
-    if(res.status===404) continue; // الموديل مش متاح للمفتاح ده: جرب اللي بعده
-    const err=new Error("gemini http "+res.status); err.status=res.status;
-    try{ err.detail=(await res.text()).slice(0,250); }catch(_){}
-    throw err;
+    for(let attempt=1; attempt<=3; attempt++){
+      if(Date.now()-t0>BUDGET){ diagPush("gemini: time budget exceeded"); break outer; }
+      const url="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent";
+      try{
+        res=await fetch(url,{method:"POST",headers:GHEADERS(key),body:JSON.stringify(body)});
+      }catch(netErr){ // انقطاع نت: محاولة وحدة كمان وبس
+        diagPush(model+": network error (try "+attempt+")");
+        res=null; lastRetryable={status:0};
+        if(attempt<2){ await sleep(2000); continue; }
+        break;
+      }
+      if(res.ok){ diagPush("gemini model: "+model); break outer; }
+      if(res.status===404){ diagPush(model+": 404"); break; } // مش متاح للمفتاح ده: اللي بعده
+      if(res.status===429||res.status===500||res.status===502||res.status===503||res.status===504){
+        diagPush(model+": "+res.status+" (try "+attempt+")");
+        lastRetryable=res;
+        if(attempt<3){
+          $("status").textContent="جوجل مشغول شوية… بنحاول تاني ("+(attempt+1)+" من ٣)";
+          await sleep(res.status===429?8000*attempt:2000*attempt);
+          continue;
+        }
+        break; // خلصت محاولاته: الموديل اللي بعده
+      }
+      const err=new Error("gemini http "+res.status); err.status=res.status;
+      try{ err.detail=(await res.text()).slice(0,250); }catch(_){}
+      throw err;
+    }
   }
-  if(!res || !res.ok){ const err=new Error("gemini: no available model"); err.status=404; throw err; }
+  if(!res || !res.ok){ const err=new Error(lastRetryable?("gemini: busy/quota after retries"):("gemini: no available model")); err.status=lastRetryable?(lastRetryable.status||0):404; throw err; }
   const j=await res.json();
   const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
   const txt=parts.map(p=>p.text||"").join("");
@@ -975,7 +1000,7 @@ $("go").addEventListener("click", async ()=>{
     $("go").disabled=true;
     readerNoteText="";
     DIAG.length=0;
-    diagPush("v4.2 | "+navigator.userAgent.slice(0,120));
+    diagPush("v4.3 | "+navigator.userAgent.slice(0,120));
     $("status").textContent="بنجهز الصور…";
     let eod=null, live=null, how="";
     const key=($( "gkey" ).value||"").trim();
@@ -993,7 +1018,7 @@ $("go").addEventListener("click", async ()=>{
         diagPush("gemini ERROR: "+String(e.status||"")+" "+String(e.detail||e.message||e).slice(0,200));
         eod=null;
         if(e.status===400||e.status===403){ $("status").textContent="مفتاح جوجل مش شغال. اتأكد منه، أو امسحه واستخدم القراءة المحلية."; return; }
-        const why=(e.status===429)?"حصة جوجل المجانية خلصت مؤقتا":(e.status===404)?"موديل القراءة مش متاح للمفتاح ده":(!e.status)?"مفيش نت أو جوجل مش متاح دلوقتي":"خطأ من جوجل ("+e.status+")";
+        const why=(e.status===429)?"حصة جوجل المجانية خلصت مؤقتا":(e.status===404)?"موديل القراءة مش متاح للمفتاح ده":(e.status===500||e.status===502||e.status===503||e.status===504)?"جوجل مشغول دلوقتي حتى بعد إعادة المحاولة":(!e.status)?"مفيش نت أو جوجل مش متاح دلوقتي":"خطأ من جوجل ("+e.status+")";
         readerNoteText="القراءة الذكية بجوجل مكملتش: "+why+" — الأرقام دي من القراءة المحلية على الموبايل، راجعها كلها كويس.";
         $("status").textContent=why+" — بنكمّل بالقراءة المحلية…";
       }
