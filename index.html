@@ -64,7 +64,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>تقرير ضيافة اليومي</h1>
+  <h1>تقرير ضيافة اليومي <span style="font-size:11px;color:var(--dim)">v3</span></h1>
   <div class="sub">ارفع صورة تقرير نهاية اليوم وصورة شاشة Summary Sales، راجع الأرقام، وانسخ التقرير جاهز.</div>
 
   <div class="card">
@@ -104,6 +104,10 @@
     <button class="main" id="go" disabled>اطلع الأرقام من الصور</button>
     <div class="prog" id="prog"><div></div></div>
     <div class="status" id="status"></div>
+    <details>
+      <summary>تفاصيل تقنية (لو فيه مشكلة صوّر ده وابعته)</summary>
+      <div class="out" id="diag" style="max-height:220px;overflow:auto">لسه مفيش قراءة</div>
+    </details>
     <div class="tips">نصيحة: صوّر الشاشة وانت واقف قدامها على طول وقريب، والإضاءة هادية، عشان القراءة تطلع أدق.</div>
     <details>
       <summary>لو القراءة من الصورة مش ظبطت: الصق النص هنا</summary>
@@ -337,30 +341,125 @@ function mergeAll(eod, live){
     headerBranch:eod.headerBranch, _conf:conf,
   };
 }
-// اختيار أفضل مرشحين من كل المحاولات، وتوليفة الفيزا اللي بتحقق مجموع التقرير
+// البقع العشرية اللي OCR بياكلها: نولّد احتمالات إدخال نقطة عشرية أو رقم 1 ضاع من الأول
+function dotVariants(v){
+  const out=[v];
+  if(v<1) return out;
+  const ip=Math.floor(v), p=Math.pow(10,String(ip).length);
+  out.push(v+p); // رقم ضاع من الأول (179.99 ← 1179.99)
+  if(!Number.isInteger(v) || v<100) return out.filter(x=>x>0&&x<500000);
+  const s=String(v);
+  if(s.length<3||s.length>8) return out.filter(x=>x>0&&x<500000);
+  for(let i=1;i<s.length;i++) out.push(Number(s.slice(0,i)+"."+s.slice(i)));
+  const s1="1"+s;
+  for(let i=1;i<s1.length;i++) out.push(Number(s1.slice(0,i)+"."+s1.slice(i)));
+  return out.filter(x=>x>0&&x<500000);
+}
+// اختيار أفضل مرشحين من كل المحاولات، وتوليفة الفيزا اللي بتحقق مجموع التقرير (مع تصحيح النقطة العشرية واشتقاق الناقص)
 function pickLive(passes, visaSum){
   const cands={visa:[],master:[],dinners:[],carryOut:[],carryOutN:[],carService:[],carServiceN:[]};
   for(const p of passes){
     for(const k of Object.keys(cands)) if(p[k]!=null) cands[k].push({v:p[k], conf:p._conf[k]||0});
   }
-  const out={_conf:{}};
-  // التوليفة: جرب كل تركيبات visa/master/dinners واختار اللي مجموعها = فيزا التقرير
+  const out={_conf:{}, _note:""};
+  const FIXED=55; // ثقة الرقم المصحّح بالمعادلة: تتحط تحت الحد عشان يتعلم برتقالي
+  const varList=(k)=>{
+    const seen=new Map();
+    for(const c of cands[k]){
+      for(const v of dotVariants(c.v)){
+        const key=v.toFixed(2);
+        if(!seen.has(key)) seen.set(key,{v, orig:c.v, oconf:c.conf, conf:v===c.v?c.conf:Math.min(c.conf,FIXED), fix:v!==c.v});
+      }
+    }
+    return [...seen.values()];
+  };
+  const nul={v:null,orig:null,oconf:0,conf:0,fix:false};
+  const vs0=varList("visa"), ms0=varList("master"), ds0=varList("dinners");
+  const vs=vs0.length?vs0.slice():[nul], ms=ms0.length?ms0.slice():[nul], ds=ds0.length?ds0.slice():[nul];
+  // سيب خيار "فاضي" جنب المرشحات عشان الاشتقاق يقدر يتجاهل مرشح غلط ويحسبه من المعادلة
+  if(visaSum!=null){ if(vs0.length) vs.push(nul); if(ms0.length) ms.push(nul); if(ds0.length) ds.push(nul); }
   let best=null;
-  const vs=cands.visa.length?cands.visa:[{v:null,conf:0}], ms=cands.master.length?cands.master:[{v:null,conf:0}], ds=cands.dinners.length?cands.dinners:[{v:null,conf:0}];
-  for(const a of vs) for(const b of ms) for(const c of ds){
-    if(a.v==null||b.v==null||c.v==null) continue;
-    const err=visaSum!=null?Math.abs(a.v+b.v+c.v-visaSum):0;
-    const conf=(a.conf+b.conf+c.conf)/3;
-    const score=(visaSum!=null&&err>0.5?10000+err:0)-conf/100;
-    if(!best||score<best.score) best={a,b,c,score};
+  for(const a of (vs.length?vs:[nul])) for(const b of (ms.length?ms:[nul])) for(const c of (ds.length?ds:[nul])){
+    const kc=(a.v!=null)+(b.v!=null)+(c.v!=null);
+    let derived=null, resid=null, corro=false;
+    if(kc===2 && visaSum!=null){
+      const r=Math.round((visaSum-(a.v||0)-(b.v||0)-(c.v||0))*100)/100;
+      if(r>0.009 && r<=visaSum+0.01){
+        derived=a.v==null?"visa":(b.v==null?"master":"dinners"); resid=r;
+        // لو القيمة المشتقة موجودة فعلا في مرشحات الخانة (بنقطة مصححة مثلا) تبقى مؤكدة مش مجرد حساب
+        const ml=derived==="visa"?vs0:(derived==="master"?ms0:ds0);
+        corro=ml.some(c=>Math.abs(c.v-r)<0.005);
+      } else continue;
+    } else if(kc<3) continue;
+    const err=(visaSum!=null&&!derived)?Math.abs(a.v+b.v+c.v-visaSum):0;
+    const fixes=(a.fix?1:0)+(b.fix?1:0)+(c.fix?1:0)+(derived?(corro?1:5):0);
+    const conf=((a.conf||0)+(b.conf||0)+(c.conf||0))/3;
+    let score;
+    if(visaSum==null) score=fixes*100000-conf;            // مفيش مرجع: الأصلية الأعلى ثقة، من غير تعديل
+    else if(derived||err<=0.05) score=fixes*100-conf;      // المعادلة اتحققت: أقل تعديلات ثم أعلى ثقة
+    else score=1000000+err*10+fixes*50;                    // المعادلة مش اتحققت: آخر اختيار
+    if(!best||score<best.score) best={a,b,c,score,derived,resid,corro,ok:visaSum!=null&&(derived!=null||err<=0.05)};
   }
-  if(best){ out.visa=best.a.v; out.master=best.b.v; out.dinners=best.c.v; out._conf.visa=best.a.conf; out._conf.master=best.b.conf; out._conf.dinners=best.c.conf; }
-  else { out.visa=null; out.master=null; out.dinners=null; out._conf.visa=0; out._conf.master=0; out._conf.dinners=0; }
+  const notes=[];
+  const take=(name,slot,derivedHere)=>{
+    if(derivedHere){ notes.push(name+(best.corro?" اتأكدت":" اشتُقّت")+" من المعادلة ("+best.resid+")"); return {v:best.resid, conf:best.corro?55:45}; }
+    if(slot.v==null) return {v:null, conf:0};
+    if(best.ok && slot.fix){ notes.push(name+" "+slot.orig+" → "+slot.v); return {v:slot.v, conf:slot.conf}; }
+    return {v:slot.orig, conf:slot.oconf};
+  };
+  if(best){
+    const A=take("visa",best.a,best.derived==="visa");
+    const B=take("master",best.b,best.derived==="master");
+    const C=take("dinners",best.c,best.derived==="dinners");
+    out.visa=A.v; out._conf.visa=A.conf; out.master=B.v; out._conf.master=B.conf; out.dinners=C.v; out._conf.dinners=C.conf;
+  } else { out.visa=out.master=out.dinners=null; out._conf.visa=out._conf.master=out._conf.dinners=0; }
   for(const k of ["carryOut","carryOutN","carService","carServiceN"]){
     if(cands[k].length){ cands[k].sort((x,y)=>y.conf-x.conf); out[k]=cands[k][0].v; out._conf[k]=cands[k][0].conf; }
     else { out[k]=null; out._conf[k]=0; }
   }
+  out._note=notes.join(" | ");
   return out;
+}
+// معادلات التقرير: Di.in+H.D = Gross without disc، والأعداد = Transactions
+function equationFix(m){
+  const notes=[];
+  const g=m.grossNoDisc;
+  if(g!=null){
+    const a=m.diin, b=m.hd;
+    if(a!=null && b!=null && Math.abs(a+b-g)>0.05){
+      let hit=null, hitLoose=null;
+      for(const x of dotVariants(a)) for(const y of dotVariants(b)){
+        const err=Math.abs(x+y-g);
+        if(err<=0.05 && (!hit||err<hit.err)) hit={x,y,err};
+        // g نفسه ممكن يكون اتقري ناقص كسره (13013 بدل 13013.99): اقبل فرق أقل من جنيه لو الاتنين بكسر
+        if(err<1 && Number.isInteger(g) && (!hitLoose||err<hitLoose.err)) hitLoose={x,y,err};
+      }
+      const use=hit||hitLoose;
+      if(use && (use.x!==a||use.y!==b)){
+        notes.push(`diin ${a}→${use.x}، hd ${b}→${use.y}`);
+        m.diin=use.x; m.hd=use.y;
+        m._conf.diin=Math.min(m._conf.diin||99,55); m._conf.hd=Math.min(m._conf.hd||99,55);
+      }
+    } else if((a==null)!==(b==null)){
+      const known=a!=null?a:b; const miss=a!=null?"hd":"diin";
+      const r=Math.round((g-known)*100)/100;
+      if(r>0 && r<=g){ m[miss]=r; m._conf[miss]=50; notes.push(miss+" اشتُقّت ("+r+")"); }
+    }
+  }
+  const t=m.transactions;
+  if(t!=null){
+    const a=m.diinN, b=m.hdN;
+    if((a==null)!==(b==null)){
+      const known=a!=null?a:b; const miss=a!=null?"hdN":"diinN";
+      const r=t-known;
+      if(r>=0 && r<1000){ m[miss]=r; m._conf[miss]=50; notes.push("عدد "+miss+" اشتُقّ ("+r+")"); }
+    } else if(a!=null && b!=null && a+b!==t){
+      // مش عارفين أنهي واحد غلط: علّم الاتنين للمراجعة
+      m._conf.diinN=Math.min(m._conf.diinN||99,45); m._conf.hdN=Math.min(m._conf.hdN||99,45);
+      notes.push(`أعداد الأوردرات مش مطابقة (${a}+${b}≠${t})`);
+    }
+  }
+  return notes;
 }
 
 /* ---------- review table ---------- */
@@ -524,17 +623,27 @@ $("clearAll").addEventListener("click", ()=>{ saveHist([]); toast("اتمسح");
 renderHist();
 
 /* ---------- OCR ---------- */
-function loadImage(file){
-  return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(img); img.onerror=rej; img.src=URL.createObjectURL(file); });
+const DIAG=[];
+function diagPush(s){ DIAG.push(s); $("diag").textContent=DIAG.join("\n"); }
+async function decodeFile(file){
+  if(window.createImageBitmap){
+    try{ const b=await createImageBitmap(file); return {src:b, w:b.width, h:b.height, how:"bitmap"}; }catch(e){}
+  }
+  const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=URL.createObjectURL(file); });
+  return {src:img, w:img.naturalWidth, h:img.naturalHeight, how:"img"};
 }
-function prepCanvas(img, blur){
-  const scale=Math.min(2.2, 2400/Math.max(img.width,img.height)||1, 3);
-  const s=Math.max(1,scale);
+const MAXDIM=2400;
+function prepCanvas(dec, blur, rot){ // rot: 0 عادي، 1 تدوير 90 مع عقارب الساعة، -1 عكسها
+  let sw=dec.w, sh=dec.h;
+  if(rot){ const t=sw; sw=sh; sh=t; }
+  const scale=Math.min(2.2, MAXDIM/Math.max(sw,sh)||1, 3); // يكبّر الصغير ويصغّر الكبير لحد 2400
   const c=document.createElement("canvas");
-  c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
+  c.width=Math.round(sw*scale); c.height=Math.round(sh*scale);
   const ctx=c.getContext("2d");
   if(blur){ try{ ctx.filter="blur(1.1px)"; }catch(e){} }
-  ctx.drawImage(img,0,0,c.width,c.height);
+  if(rot===1){ ctx.translate(c.width,0); ctx.rotate(Math.PI/2); ctx.drawImage(dec.src,0,0,dec.w,dec.h,0,0,dec.w*scale,dec.h*scale); }
+  else if(rot===-1){ ctx.translate(0,c.height); ctx.rotate(-Math.PI/2); ctx.drawImage(dec.src,0,0,dec.w,dec.h,0,0,dec.w*scale,dec.h*scale); }
+  else ctx.drawImage(dec.src,0,0,c.width,c.height);
   try{ ctx.filter="none"; }catch(e){}
   const d=ctx.getImageData(0,0,c.width,c.height);
   const px=d.data; const n=px.length/4;
@@ -619,33 +728,64 @@ function Pjoin(nums){ return joinAmount(nums); }
 $("go").addEventListener("click", async ()=>{
   try{
     $("go").disabled=true;
+    DIAG.length=0;
+    diagPush("v3 | "+navigator.userAgent.slice(0,120));
     $("status").textContent="بنجهز الصور…";
-    const [imgE,imgL]=await Promise.all([loadImage(imgs.eod), loadImage(imgs.live)]);
-    const cE=prepCanvas(imgE,false);
-    const cL1=prepCanvas(imgL,false);
-    const cL2=prepCanvas(imgL,true);
+    const [decE,decL]=await Promise.all([decodeFile(imgs.eod), decodeFile(imgs.live)]);
+    diagPush(`receipt: ${decE.w}x${decE.h} (${decE.how}) | screen: ${decL.w}x${decL.h} (${decL.how})`);
+    const cE=prepCanvas(decE,false,0);
+    const cL1=prepCanvas(decL,false,0);
+    const cL2=prepCanvas(decL,true,0);
+    diagPush(`canvas receipt: ${cE.width}x${cE.height} | screen: ${cL1.width}x${cL1.height}`);
     const worker=await getWorker();
     // التقرير: محاولة واحدة كفاية
     const eodRes=await ocrRows(worker, cE, "6");
     $("txtEod").value=eodRes.text.trim();
     const eod=parseEod(eodRes.rows);
-    // الشاشة: ٣ محاولات قراءة + دمج
-    const passes=[];
-    const p1=await ocrRows(worker, cL1, "6"); passes.push(parseLive(p1.rows));
+    // الشاشة: محاولات قراءة متعددة + دمج
+    const passes=[]; const liveRowSets=[];
+    const p1=await ocrRows(worker, cL1, "6"); passes.push(parseLive(p1.rows)); liveRowSets.push({rows:p1.rows, canvas:cL1});
     $("txtLive").value=p1.text.trim();
-    const p2=await ocrRows(worker, cL2, "6"); passes.push(parseLive(p2.rows));
-    const p3=await ocrRows(worker, cL1, "11"); passes.push(parseLive(p3.rows));
-    let live=pickLive(passes, eod.visaSum);
-    // لو لسه فيه قيم ناقصة من الشاشة: جرب القراءة بالموقع
-    const missing=["visa","master","dinners"].filter(k=>live[k]==null);
-    if(missing.length){
-      const allRows=p1.rows.concat(p2.rows, p3.rows);
-      const geo=await geometryRead(worker, cL1, allRows, [
+    diagPush("pass A: "+passStr(passes[0]));
+    const p2=await ocrRows(worker, cL2, "6"); passes.push(parseLive(p2.rows)); liveRowSets.push({rows:p2.rows, canvas:cL2});
+    diagPush("pass B: "+passStr(passes[1]));
+    const p4=await ocrRows(worker, cL1, "11"); passes.push(parseLive(p4.rows)); liveRowSets.push({rows:p4.rows, canvas:cL1});
+    diagPush("pass D: "+passStr(passes[2]));
+    // محاولة الصورة المدوّرة (الاتجاهين): بس لو الصورة مقلوبة فعلا (عرضية) أو القراءات كلها فشلت، عشان منضيعش وقت الموبايل
+    const foundAny=passes.some(p=>p.visa!=null||p.master!=null||p.dinners!=null);
+    if(decL.w>decL.h || !foundAny){
+      for(const rot of [1,-1]){
+        const cL3=prepCanvas(decL,false,rot);
+        const p3=await ocrRows(worker, cL3, "6"); passes.push(parseLive(p3.rows)); liveRowSets.push({rows:p3.rows, canvas:cL3});
+        diagPush("pass C(rot"+rot+"): "+passStr(passes[passes.length-1]));
+        const got=passes[passes.length-1];
+        if(got.visa!=null||got.master!=null||got.dinners!=null) break; // لقينا قراءة كويسة، بلاش الاتجاه التاني
+      }
+    } else diagPush("pass C(rot): skipped");
+    // القراءة بالموقع كمرشح إضافي لو فيه بند ناقص من كل المحاولات
+    const needGeo=["visa","master","dinners"].some(k=>passes.every(p=>p[k]==null));
+    if(needGeo){
+      // اقرأ بالموقع على أنجح محاولة (اللي لقت أكتر بنود) وعلى الـ canvas بتاعها بالذات
+      let bi=0, bs=-1;
+      passes.forEach((p,i)=>{ const s=["visa","master","dinners","carryOut","carService"].filter(k=>p[k]!=null).length; if(s>bs){bs=s;bi=i;} });
+      const src=liveRowSets[bi];
+      const geo=await geometryRead(worker, src.canvas, src.rows, [
         {key:"visa",idx:9},{key:"master",idx:10},{key:"dinners",idx:11},{key:"carryOut",idx:0},
-      ].filter(t=>missing.includes(t.key)||(t.key==="carryOut"&&live.carryOut==null)));
-      for(const k of Object.keys(geo)){ if(live[k]==null){ live[k]=geo[k].v; live._conf[k]=geo[k].conf; } }
+      ]);
+      if(Object.keys(geo).length){
+        const gp={visa:null,master:null,dinners:null,carryOut:null,carryOutN:null,carService:null,carServiceN:null,_conf:{}};
+        for(const k of Object.keys(geo)){
+          if(geo[k].v>0 && geo[k].v<500000){ gp[k]=geo[k].v; gp._conf[k]=geo[k].conf; }
+        }
+        passes.push(gp);
+        diagPush("geometry: "+JSON.stringify(geo));
+      }
     }
+    let live=pickLive(passes, eod.visaSum);
+    diagPush("chosen: "+passStr(live)+(live._note?" | fixed: "+live._note:""));
     merged=mergeAll(eod, live);
+    const fx=equationFix(merged);
+    if(fx.length) diagPush("corrected: "+fx.join(" | "));
     if(merged.headerBranch && !$("branch").value.trim()){
       const hs=squash(merged.headerBranch);
       const found=BRANCHES.find(b=>hs.startsWith(squash(b))||squash(b).startsWith(hs));
@@ -656,12 +796,14 @@ $("go").addEventListener("click", async ()=>{
     if(miss.length) $("status").textContent="راجع الأرقام تحت 👇 الخانات الفاضية اكتبها بإيدك من الشاشة.";
     else if(!$("status").textContent.includes("بصعوبة")) $("status").textContent="راجع الأرقام تحت 👇";
   }catch(e){
+    diagPush("ERROR: "+String(e&&e.message||e).slice(0,150));
     $("status").textContent="حصلت مشكلة في القراءة. جرب الصق النص من الملخص تحت.";
   }finally{
     $("go").disabled=false;
     $("prog").style.display="none";
   }
 });
+function passStr(p){ return ["visa","master","dinners","carryOut","carService"].map(k=>k+"="+(p[k]==null?"-":p[k])).join(" "); }
 $("goTxt").addEventListener("click", ()=>{
   const p1=parsePasted($("txtEod").value);
   const p2=parsePasted($("txtLive").value);
