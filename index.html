@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تقرير ضيافة اليومي</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a222b; --line:#2b3642; --txt:#eef3f8; --dim:#9fb0c0; --acc:#3da9fc; --ok:#35c48d; --warn:#f5a623; --bad:#ef6461; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI",Tahoma,Arial,sans-serif; background:var(--bg); color:var(--txt); }
+  .wrap { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:8px 0 2px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:16px; line-height:1.6; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
+  .card h2 { font-size:15px; margin:0 0 10px; color:var(--acc); }
+  label { display:block; font-size:13px; color:var(--dim); margin:10px 0 4px; }
+  input[type=text], input[type=date], textarea {
+    width:100%; padding:10px; border-radius:10px; border:1px solid var(--line);
+    background:#11181f; color:var(--txt); font-size:16px; font-family:inherit;
+  }
+  textarea { min-height:70px; direction:ltr; text-align:left; font-size:14px; }
+  .row2 { display:flex; gap:10px; }
+  .row2 > div { flex:1; }
+  .filebtn {
+    display:block; text-align:center; padding:14px; border:2px dashed var(--line);
+    border-radius:12px; color:var(--dim); cursor:pointer; font-size:14px; margin-top:6px;
+  }
+  .filebtn.has { border-color:var(--ok); color:var(--ok); }
+  input[type=file] { display:none; }
+  .prev { max-width:100%; max-height:140px; border-radius:10px; margin-top:8px; display:none; }
+  button.main {
+    width:100%; padding:14px; border:none; border-radius:12px; font-size:16px; font-weight:bold;
+    background:var(--acc); color:#04121f; cursor:pointer; margin-top:6px;
+  }
+  button.main:disabled { opacity:.4; }
+  button.ghost {
+    padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:none;
+    color:var(--txt); cursor:pointer; font-size:14px;
+  }
+  .prog { height:8px; background:#11181f; border-radius:6px; overflow:hidden; margin-top:10px; display:none; }
+  .prog > div { height:100%; width:0%; background:var(--acc); transition:width .2s; }
+  .status { font-size:13px; color:var(--dim); margin-top:6px; min-height:18px; line-height:1.5; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-top:6px; }
+  th, td { padding:6px 4px; border-bottom:1px solid var(--line); text-align:right; }
+  th { color:var(--dim); font-weight:normal; font-size:12px; }
+  td input { width:84px; padding:6px; border-radius:8px; border:1px solid var(--line); background:#11181f; color:var(--txt); font-size:15px; text-align:center; }
+  td input.missing { border-color:var(--warn); }
+  .src { font-size:11px; color:var(--dim); }
+  .check { font-size:13px; padding:8px 10px; border-radius:10px; margin-top:10px; display:none; line-height:1.5; }
+  .check.bad { display:block; background:rgba(239,100,97,.12); color:var(--bad); border:1px solid var(--bad); }
+  .check.good { display:block; background:rgba(53,196,141,.12); color:var(--ok); border:1px solid var(--ok); }
+  .out {
+    direction:ltr; text-align:left; background:#11181f; border:1px solid var(--line); border-radius:10px;
+    padding:10px; font-size:13px; word-break:break-all; margin-top:8px; font-family:monospace;
+  }
+  .histrow { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .histlist { direction:ltr; text-align:left; font-family:monospace; font-size:12px; color:var(--dim); max-height:180px; overflow:auto; margin-top:8px; white-space:pre-wrap; }
+  .btns { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--ok); color:#04121f; padding:10px 18px; border-radius:20px; font-size:14px; display:none; z-index:9; }
+  details { margin-top:10px; font-size:13px; color:var(--dim); }
+  .tips { font-size:12px; color:var(--dim); line-height:1.7; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>تقرير ضيافة اليومي</h1>
+  <div class="sub">ارفع صورة تقرير نهاية اليوم وصورة شاشة Summary Sales، راجع الأرقام، وانسخ الصف جاهز للإكسيل.</div>
+
+  <div class="card">
+    <h2>١) البيانات</h2>
+    <div class="row2">
+      <div>
+        <label>الفرع</label>
+        <input type="text" id="branch" placeholder="اسم الفرع" list="branches">
+        <datalist id="branches">
+          <option value="Madinaty"></option>
+          <option value="Arabella"></option>
+          <option value="Tivoli Plaza"></option>
+          <option value="Arkan"></option>
+          <option value="Zamalek"></option>
+          <option value="Maadi"></option>
+          <option value="El rehab"></option>
+          <option value="Green Plaza"></option>
+        </datalist>
+      </div>
+      <div>
+        <label>التاريخ</label>
+        <input type="date" id="date">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>٢) الصورتين</h2>
+    <label>تقرير نهاية اليوم (Summary Statements)</label>
+    <label class="filebtn" for="imgEod" id="btnEod">اضغط لاختيار الصورة</label>
+    <input type="file" id="imgEod" accept="image/*">
+    <img class="prev" id="prevEod" alt="">
+    <label>شاشة Summary Sales (قبل القفل)</label>
+    <label class="filebtn" for="imgLive" id="btnLive">اضغط لاختيار الصورة</label>
+    <input type="file" id="imgLive" accept="image/*">
+    <img class="prev" id="prevLive" alt="">
+    <button class="main" id="go" disabled>اطلع الأرقام من الصور</button>
+    <div class="prog" id="prog"><div></div></div>
+    <div class="status" id="status"></div>
+    <div class="tips">نصيحة: صوّر الشاشة وانت واقف قدامها على طول وقريب، والإضاءة هادية، عشان القراءة تطلع أدق.</div>
+    <details>
+      <summary>لو القراءة من الصورة مش ظبطت: الصق النص هنا</summary>
+      <label>نص تقرير نهاية اليوم (سطر لكل بند: الاسم,المبلغ,العدد)</label>
+      <textarea id="txtEod" placeholder="Gross,13396.41"></textarea>
+      <label>نص شاشة Summary Sales</label>
+      <textarea id="txtLive" placeholder="Carry Out,1279.99,9"></textarea>
+      <div class="btns"><button class="ghost" id="goTxt">اطلع من النص</button></div>
+    </details>
+  </div>
+
+  <div class="card" id="resCard" style="display:none">
+    <h2>٣) راجع الأرقام وعدل لو فيه غلطة</h2>
+    <table id="tbl">
+      <thead><tr><th>الخانة</th><th>المبلغ</th><th>العدد</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="check" id="visaCheck"></div>
+    <div class="check" id="totalCheck"></div>
+    <div class="check" id="countCheck"></div>
+    <div class="btns">
+      <button class="main" id="mk" style="flex:1">اعمل الصف</button>
+    </div>
+    <div class="out" id="rowOut" style="display:none"></div>
+    <div class="btns" id="rowBtns" style="display:none">
+      <button class="ghost" id="copyRow">انسخ الصف</button>
+      <button class="ghost" id="saveRow">احفظ في الأرشيف</button>
+    </div>
+  </div>
+
+  <div class="card" id="histCard" style="display:none">
+    <div class="histrow">
+      <h2 style="margin:0">الأرشيف (مرتب بالتاريخ)</h2>
+      <div class="btns" style="margin:0">
+        <button class="ghost" id="copyAll">انسخ الكل</button>
+        <button class="ghost" id="clearAll">امسح</button>
+      </div>
+    </div>
+    <div class="histlist" id="histList"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const BRANCHES = ["Madinaty","Arabella","Tivoli Plaza","Arkan","Zamalek","Maadi","El rehab","Green Plaza"];
+
+/* ---------- setup: branch + date ---------- */
+$("branch").value = localStorage.getItem("df_branch") || "";
+$("branch").addEventListener("change", () => localStorage.setItem("df_branch", $("branch").value.trim()));
+(function initDate(){
+  const now = new Date();
+  if (now.getHours() < 4) now.setDate(now.getDate() - 1); // التقفيلة بعد نص الليل بتاعت يوم اللي فات
+  const p = (x) => String(x).padStart(2,"0");
+  $("date").value = `${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}`;
+})();
+function fmtDate(iso){ const [y,m,d]=iso.split("-"); return `${Number(d)}/${Number(m)}/${y}`; }
+
+/* ---------- photo pickers ---------- */
+const imgs = { eod:null, live:null };
+function bindPick(inputId, btnId, prevId, key){
+  $(inputId).addEventListener("change", (ev) => {
+    const f = ev.target.files[0]; if(!f) return;
+    imgs[key] = f;
+    $(btnId).textContent = "✓ " + (f.name.length>26 ? f.name.slice(0,24)+"…" : f.name);
+    $(btnId).classList.add("has");
+    $(prevId).src = URL.createObjectURL(f); $(prevId).style.display = "block";
+    $("go").disabled = !(imgs.eod && imgs.live);
+  });
+}
+bindPick("imgEod","btnEod","prevEod","eod");
+bindPick("imgLive","btnLive","prevLive","live");
+
+/* ---------- number helpers ---------- */
+const AR = {"٠":"0","١":"1","٢":"2","٣":"3","٤":"4","٥":"5","٦":"6","٧":"7","٨":"8","٩":"9"};
+const norm = (s) => s.replace(/[٠-٩]/g, (ch) => AR[ch]);
+const squash = (s) => s.toLowerCase().replace(/[^a-z#]/g, "");
+function numsIn(line){
+  const out=[]; const re=/-?\d[\d,]*\.?\d*/g; let m;
+  while((m=re.exec(line))!==null){ const v=parseFloat(m[0].replace(/,/g,"")); if(!isNaN(v)) out.push({v, dec:m[0].includes(".")}); }
+  return out;
+}
+const amountOf=(nums)=>{const d=nums.filter(x=>x.dec);return d.length?Math.max(...d.map(x=>x.v)):null;};
+const joinAmount=(nums)=>{const a=amountOf(nums);if(a!==null)return a;const ints=nums.map(x=>x.v);if(ints.length>=2&&ints[ints.length-1]<=99)return ints[ints.length-2]+ints[ints.length-1]/100;return ints.length?Math.max(...ints):null;};
+const firstInt=(nums)=>{const i=nums.filter(x=>!x.dec).map(x=>x.v);return i.length?i[0]:null;};
+
+/* ---------- OCR lines ---------- */
+function linesToRows(lines){
+  return (lines||[]).filter(l=>l.text&&l.text.trim()).map(l=>{
+    const ws=(l.words||[]).filter(w=>w.text&&w.text.trim()).map(w=>({t:norm(w.text.trim()), x0:w.bbox.x0}));
+    ws.sort((a,b)=>a.x0-b.x0);
+    const text=ws.length?ws.map(w=>w.t).join(" "):norm(l.text.trim());
+    return {text, sq:squash(text), nums:numsIn(text.replace(/[A-Za-z]+/g," ")), words:ws};
+  });
+}
+
+/* ---------- parse: end-of-day receipt (one concept per row) ---------- */
+function parseEod(rows){
+  const rowBy=(pred)=>rows.find(r=>pred(r.sq));
+  const gR=rowBy(s=>s.startsWith("grosssales"));
+  const gwR=rowBy(s=>s.startsWith("grosswithoutdisc")||(s.includes("gross")&&s.includes("without")));
+  const ncR=rowBy(s=>s.startsWith("netcash"));
+  const trR=rowBy(s=>s.startsWith("transactions"));
+  const avR=rowBy(s=>s.startsWith("averagecheck"));
+  const vatR=rowBy(s=>s.startsWith("vat"));
+  let prepaid=null,prepaidN=null;
+  const cIdx=rows.findIndex(r=>r.sq.includes("curr"));
+  if(cIdx>=0){ const ns=[...rows[cIdx].nums, ...(rows[cIdx+1]?rows[cIdx+1].nums:[])]; prepaid=joinAmount(ns); prepaidN=firstInt(ns); }
+  let visaSum=null;
+  const vIdx=rows.findIndex(r=>r.sq.includes("visaorders")||(r.sq.startsWith("visa")&&r.sq.includes("orders")));
+  if(vIdx>=0 && rows[vIdx+1]) visaSum=joinAmount(rows[vIdx+1].nums);
+  const tgR=rowBy(s=>s.includes("togo")&&s.includes("amount"));
+  const cntOf=(row)=>{ if(!row) return null; const i=firstInt(row.nums); if(i!=null) return i; return row.nums.length?Math.round(row.nums[0].v):null; };
+  let togo=null,togoN=null;
+  if(tgR){ togo=joinAmount(tgR.nums); const rest=tgR.nums.filter(x=>x.v!==togo); if(rest.length) togoN=Math.round(rest[0].v);
+    if(togoN==null){ const c=cntOf(rows[rows.indexOf(tgR)+1]); if(c!=null&&c<500) togoN=c; } }
+  const dlR=rowBy(s=>s.includes("delivery")&&s.includes("amount"));
+  let delivery=null,deliveryN=null;
+  if(dlR){ delivery=joinAmount(dlR.nums); const rest=dlR.nums.filter(x=>x.v!==delivery); if(rest.length) deliveryN=Math.round(rest[rest.length-1].v);
+    if(deliveryN==null){ const c=cntOf(rows[rows.indexOf(dlR)+1]); if(c!=null&&c<500) deliveryN=c; } }
+  const headerBranch=rows.length>1 && !/\d/.test(rows[1].text)?rows[1].text.replace(/[^A-Za-z ]/g,"").trim():null;
+  return {
+    gross:gR?joinAmount(gR.nums):null, grossNoDisc:gwR?joinAmount(gwR.nums):null,
+    netCash:ncR?joinAmount(ncR.nums):null, transactions:trR?firstInt(trR.nums):null,
+    av:avR?joinAmount(avR.nums):null, vat:vatR?joinAmount(vatR.nums):null,
+    prepaid, prepaidN, visaSum, togo, togoN, delivery, deliveryN, headerBranch,
+  };
+}
+
+/* ---------- parse: live screen (two columns) ---------- */
+function liveGrab(rows, wordPreds){
+  for(const r of rows){
+    for(let i=0;i<r.words.length;i++){
+      const one=squash(r.words[i].t);
+      const two=i+1<r.words.length?one+squash(r.words[i+1].t):one;
+      if(wordPreds.some(p=>one.startsWith(p)||two.startsWith(p))){
+        const start=(wordPreds.some(p=>two.startsWith(p))&&!wordPreds.some(p=>one.startsWith(p)))?i+2:i+1;
+        const out=[]; let started=false, gap=0;
+        for(let j=start;j<r.words.length;j++){
+          const ns=numsIn(r.words[j].t);
+          if(ns.length){ out.push(...ns); started=true; }
+          else { if(started) break; if(++gap>4) break; }
+        }
+        if(out.length) return out;
+      }
+    }
+  }
+  return null;
+}
+function parseLive(rows){
+  const num=(ns)=>ns?joinAmount(ns):null;
+  const cnt=(ns)=>{ if(!ns)return null; const a=joinAmount(ns); const rest=ns.filter(x=>x.v!==a).map(x=>Math.round(x.v)); return rest.length?rest[rest.length-1]:null; };
+  return {
+    visa:num(liveGrab(rows,["visa"])), master:num(liveGrab(rows,["master"])), dinners:num(liveGrab(rows,["dinner"])),
+    carryOut:num(liveGrab(rows,["carryout","caryout","carry","cary"])), carryOutN:cnt(liveGrab(rows,["carryout","caryout","carry","cary"])),
+    carService:num(liveGrab(rows,["carse"])), carServiceN:cnt(liveGrab(rows,["carse"])),
+  };
+}
+
+/* ---------- pasted text (lesson 13 format: Name,amount[,count]) ---------- */
+function parsePasted(text){
+  const d={};
+  for(const line of norm(text).split(/\n+/)){
+    const parts=line.split(",");
+    if(parts.length<2) continue;
+    const name=parts[0].trim();
+    const amount=parseFloat(parts[1]);
+    if(isNaN(amount)) continue;
+    const count=parts.length>2 && parts[2].trim()!=="" ? parseInt(parts[2],10) : null;
+    d[squash(name)]={amount, count};
+  }
+  const g=(...ks)=>{ for(const k of ks){ if(d[k]) return d[k]; } return null; };
+  return {
+    eod:{
+      gross:(g("grosssales","gross")||{}).amount ?? null,
+      grossNoDisc:(g("grosswithoutdisc")||{}).amount ?? null,
+      netCash:(g("netcash")||{}).amount ?? null,
+      transactions:(g("transactions")||{count:null}).count ?? (g("netcash")||{count:null}).count ?? null,
+      av:(g("averagecheck")||{}).amount ?? null,
+      vat:(g("vat","salestax")||{}).amount ?? null,
+      prepaid:(g("ccurrency","ourcurrency")||{}).amount ?? null,
+      prepaidN:(g("ccurrency","ourcurrency")||{count:null}).count ?? null,
+      visaSum:null, togo:null, togoN:null, delivery:null, deliveryN:null, headerBranch:null,
+    },
+    live:{
+      visa:(g("visa")||{}).amount ?? null,
+      master:(g("master")||{}).amount ?? null,
+      dinners:(g("dinners","dinner")||{}).amount ?? null,
+      carryOut:(g("carryout")||{}).amount ?? null,
+      carryOutN:(g("carryout")||{count:null}).count ?? null,
+      carService:(g("carservice")||{}).amount ?? null,
+      carServiceN:(g("carservice")||{count:null}).count ?? null,
+    },
+  };
+}
+
+/* ---------- merge ---------- */
+function mergeAll(eod, live){
+  return {
+    gross:eod.gross, grossNoDisc:eod.grossNoDisc, netCash:eod.netCash, transactions:eod.transactions,
+    av:eod.av, vat:eod.vat, prepaid:eod.prepaid, prepaidN:eod.prepaidN, visaSum:eod.visaSum,
+    visa:live.visa, master:live.master, dinners:live.dinners,
+    diin:eod.togo ?? live.carryOut, diinN:eod.togoN ?? live.carryOutN,
+    hd:eod.delivery ?? live.carService, hdN:eod.deliveryN ?? live.carServiceN,
+    headerBranch:eod.headerBranch,
+  };
+}
+
+/* ---------- review table ---------- */
+const FIELDS = [
+  { k:"gross",       name:"Gross",              v:(m)=>m.gross,       n:(m)=>null,           cnt:false },
+  { k:"grossNoDisc", name:"Gross without disc", v:(m)=>m.grossNoDisc, n:(m)=>null,           cnt:false },
+  { k:"netCash",     name:"Net Cash",           v:(m)=>m.netCash,     n:(m)=>m.transactions, cnt:true },
+  { k:"av",          name:"A.V",                v:(m)=>m.av,          n:(m)=>null,           cnt:false },
+  { k:"vat",         name:"Vat",                v:(m)=>m.vat,         n:(m)=>null,           cnt:false },
+  { k:"visa",        name:"VISA (داين إن)",      v:(m)=>m.visa,        n:(m)=>null,           cnt:false },
+  { k:"diin",        name:"Di.in",              v:(m)=>m.diin,        n:(m)=>m.diinN,        cnt:true },
+  { k:"hd",          name:"H.D",                v:(m)=>m.hd,          n:(m)=>m.hdN,          cnt:true },
+  { k:"prepaid",     name:"مدفوع مقدما",         v:(m)=>m.prepaid,     n:(m)=>m.prepaidN,     cnt:true },
+  { k:"rabbit",      name:"Rabbit",             v:(m)=>m.master,      n:(m)=>null,           cnt:true },
+  { k:"breadfast",   name:"breadfast",          v:(m)=>m.dinners,     n:(m)=>null,           cnt:true },
+];
+let merged = null;
+
+function fillTable(){
+  const tb=$("tbl").querySelector("tbody"); tb.innerHTML="";
+  for(const f of FIELDS){
+    const a=f.v(merged), n=f.n(merged);
+    const tr=document.createElement("tr");
+    tr.innerHTML = `<td>${f.name}</td>
+      <td><input type="text" inputmode="decimal" id="a_${f.k}" value="${a==null?"":a}" ${a==null?'class="missing"':""}></td>
+      <td>${f.cnt?`<input type="text" inputmode="numeric" id="n_${f.k}" value="${n==null?"":n}" ${n==null?'class="missing"':""} placeholder="">`:""}</td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll("input").forEach(inp=>inp.addEventListener("input", ()=>{ inp.classList.remove("missing"); validateVisa(); }));
+  validateVisa();
+  $("resCard").style.display="block";
+  $("resCard").scrollIntoView({behavior:"smooth"});
+}
+function val(k){ const el=$("a_"+k); return el&&el.value.trim()!==""?parseFloat(el.value):null; }
+function setCheck(box, ok, okMsg, badMsg){ box.className="check "+(ok?"good":"bad"); box.textContent=(ok?"✅ ":"⚠️ ")+(ok?okMsg:badMsg); }
+function cnt(k){ const el=$("n_"+k); return el&&el.value.trim()!==""?parseFloat(el.value):null; }
+function validateVisa(){
+  const box=$("visaCheck");
+  if(!merged || merged.visaSum==null){ box.className="check"; } else {
+    const v=val("visa"), r=val("rabbit"), b=val("breadfast");
+    if(v==null||r==null||b==null){ box.className="check"; } else {
+      const sum=v+r+b;
+      setCheck(box, Math.abs(sum-merged.visaSum)<=0.5,
+        `الفيزا مظبوطة: ${v} + ${r} + ${b} = ${Math.round(sum*100)/100} زي التقرير (${merged.visaSum})`,
+        `مجموع الفيزا مش مطابق: ${v} + ${r} + ${b} = ${Math.round(sum*100)/100}، والتقرير بيقول ${merged.visaSum}. راجع خانة VISA غالبا.`);
+    }
+  }
+  const t=$("totalCheck");
+  const di=val("diin"), hd=val("hd"), gnd=val("grossNoDisc");
+  if(di==null||hd==null||gnd==null){ t.className="check"; } else {
+    setCheck(t, Math.abs(di+hd-gnd)<=1.5,
+      `Di.in + H.D = ${Math.round((di+hd)*100)/100} زي Gross without disc ✓`,
+      `Di.in (${di}) + H.D (${hd}) = ${Math.round((di+hd)*100)/100}، ومش بتساوي Gross without disc (${gnd}). راجع الخانتين.`);
+  }
+  const c=$("countCheck");
+  const dn=cnt("diin"), hn=cnt("hd"), tr=cnt("netCash");
+  if(dn==null||hn==null||tr==null){ c.className="check"; } else {
+    setCheck(c, dn+hn===tr,
+      `عدد الأوردرات مظبوط: ${dn} + ${hn} = ${tr} ✓`,
+      `أوردرات Di.in (${dn}) + H.D (${hn}) = ${dn+hn}، وعدد الأوردرات الكلي ${tr}. راجع الأعداد.`);
+  }
+}
+
+/* ---------- row building ---------- */
+function buildRow(){
+  const v=(k)=>{ const el=$("a_"+k); return el?el.value.trim():""; };
+  const c=(k)=>{ const el=$("n_"+k); return el?el.value.trim():""; };
+  const r=(x)=>x===""?"":String(Math.round(parseFloat(x)));
+  const raw=(x)=>{ const f=parseFloat(x); return isNaN(f)?"":String(Math.round(f*100)/100); };
+  const cells=[
+    fmtDate($("date").value),
+    $("branch").value.trim(),
+    r(v("gross")),
+    r(v("grossNoDisc")),
+    `${r(v("netCash"))} (${c("netCash")})`,
+    raw(v("av")),
+    r(v("vat")),
+    r(v("visa")),
+    `${r(v("diin"))} (${c("diin")})`,
+    `${r(v("hd"))} (${c("hd")})`,
+    `${r(v("prepaid"))} (${c("prepaid")})`,
+    `${r(v("rabbit"))} (${c("rabbit")})`,
+    `${r(v("breadfast"))} (${c("breadfast")})`,
+  ];
+  return cells.join(",");
+}
+$("mk").addEventListener("click", ()=>{
+  $("rowOut").textContent=buildRow();
+  $("rowOut").style.display="block";
+  $("rowBtns").style.display="flex";
+});
+
+/* ---------- copy ---------- */
+function copyText(t){
+  if(navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t);
+  return new Promise((res,rej)=>{ const ta=document.createElement("textarea"); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");res();}catch(e){rej(e);} ta.remove(); });
+}
+function toast(msg){ $("toast").textContent=msg; $("toast").style.display="block"; setTimeout(()=>$("toast").style.display="none",1800); }
+$("copyRow").addEventListener("click", ()=>copyText($("rowOut").textContent).then(()=>toast("اتنسخ ✅")));
+
+/* ---------- history ---------- */
+function hist(){ try{return JSON.parse(localStorage.getItem("df_hist")||"[]");}catch(e){return [];} }
+function saveHist(h){ localStorage.setItem("df_hist",JSON.stringify(h)); renderHist(); }
+function dkey(row){ const p=row.split(",")[0].split("/").map(Number); return p[2]*10000+p[1]*100+p[0]; }
+function renderHist(){
+  const h=hist();
+  if(!h.length){ $("histCard").style.display="none"; return; }
+  $("histCard").style.display="block";
+  $("histList").textContent=h.map(x=>x.row).join("\n");
+}
+$("saveRow").addEventListener("click", ()=>{
+  const row=$("rowOut").textContent; if(!row) return;
+  let h=hist();
+  const key=row.split(",").slice(0,2).join(",");
+  h=h.filter(x=>x.row.split(",").slice(0,2).join(",")!==key);
+  h.push({row});
+  h.sort((a,b)=>dkey(a.row)-dkey(b.row));
+  saveHist(h);
+  toast("اتحفظ ✅");
+});
+$("copyAll").addEventListener("click", ()=>{ const h=hist(); if(!h.length) return; copyText(h.map(x=>x.row).join("\n")).then(()=>toast("اتنسخ الكل ✅")); });
+$("clearAll").addEventListener("click", ()=>{ saveHist([]); toast("اتمسح"); });
+renderHist();
+
+/* ---------- OCR ---------- */
+function preprocess(file){
+  return new Promise((res,rej)=>{
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(2.2, 2400/Math.max(img.width,img.height)||1, 3);
+      const s=Math.max(1,scale);
+      const c=document.createElement("canvas");
+      c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
+      const ctx=c.getContext("2d");
+      ctx.drawImage(img,0,0,c.width,c.height);
+      const d=ctx.getImageData(0,0,c.width,c.height);
+      const px=d.data;
+      const n=px.length/4;
+      const gray=new Uint8Array(n);
+      let mn=255,mx=0;
+      for(let i=0;i<n;i++){ const g=Math.round(0.299*px[i*4]+0.587*px[i*4+1]+0.114*px[i*4+2]); gray[i]=g; if(g<mn)mn=g; if(g>mx)mx=g; }
+      const range=Math.max(1,mx-mn);
+      for(let i=0;i<n;i++){ const g=Math.round((gray[i]-mn)*255/range); px[i*4]=px[i*4+1]=px[i*4+2]=g; }
+      ctx.putImageData(d,0,0);
+      res(c);
+    };
+    img.onerror=rej;
+    img.src=URL.createObjectURL(file);
+  });
+}
+let workerP=null;
+async function getWorker(){
+  if(workerP) return workerP;
+  workerP=(async()=>{
+    try{
+      return await Tesseract.createWorker("eng", Tesseract.OEM?Tesseract.OEM.LSTM:1, { langPath:".", gzip:true, logger:log });
+    }catch(e){
+      return await Tesseract.createWorker("eng", 1, { logger:log });
+    }
+  })();
+  return workerP;
+}
+function log(m){
+  if(m.status==="recognizing text"){
+    $("prog").style.display="block";
+    const p=Math.round(m.progress*100);
+    $("prog").firstElementChild.style.width=p+"%";
+    $("status").textContent="بيقرا الصورة… "+p+"%";
+  }
+}
+async function ocrRows(worker, canvas, psm){
+  await worker.setParameters({ tessedit_pageseg_mode: psm });
+  const { data } = await worker.recognize(canvas);
+  return { rows: linesToRows(data.lines), text: data.text||"" };
+}
+
+$("go").addEventListener("click", async ()=>{
+  try{
+    $("go").disabled=true;
+    $("status").textContent="بنجهز الصور…";
+    const [cE,cL]=await Promise.all([preprocess(imgs.eod), preprocess(imgs.live)]);
+    const worker=await getWorker();
+    const eodRes=await ocrRows(worker, cE, "6");
+    const liveRes=await ocrRows(worker, cL, "6");
+    const liveRes11=await ocrRows(worker, cL, "11");
+    $("txtEod").value=eodRes.text.trim();
+    $("txtLive").value=liveRes.text.trim();
+    const eod=parseEod(eodRes.rows);
+    let live=parseLive(liveRes.rows);
+    const live11=parseLive(liveRes11.rows);
+    for(const k of Object.keys(live11)) if(live[k]==null) live[k]=live11[k];
+    // لو مجموع الفيزا مش مظبوط مع قراءة PSM6، جرب مرشح PSM11
+    let m=mergeAll(eod,live);
+    const bad=(mm)=>mm.visaSum!=null&&mm.visa!=null&&mm.master!=null&&mm.dinners!=null&&Math.abs(mm.visa+mm.master+mm.dinners-mm.visaSum)>0.5;
+    if(bad(m) && live11.visa!=null && live11.visa!==live.visa){
+      const alt=mergeAll(eod,{...live,visa:live11.visa});
+      if(!bad(alt)) m=alt;
+    }
+    merged=m;
+    // الفرع من أول التقرير
+    if(m.headerBranch && !$("branch").value.trim()){
+      const hs=squash(m.headerBranch);
+      const found=BRANCHES.find(b=>hs.startsWith(squash(b))||squash(b).startsWith(hs));
+      if(found){ $("branch").value=found; localStorage.setItem("df_branch",found); }
+    }
+    fillTable();
+    const missing=FIELDS.filter(f=>f.v(merged)==null).map(f=>f.name);
+    $("status").textContent = missing.length ? "راجع الأرقام تحت 👇 الخانات المعلّمة مش مقروءة، اكتبها بإيدك." : "راجع الأرقام تحت 👇";
+  }catch(e){
+    $("status").textContent="حصلت مشكلة في القراءة. جرب الصق النص من الملخص تحت.";
+  }finally{
+    $("go").disabled=false;
+    $("prog").style.display="none";
+  }
+});
+$("goTxt").addEventListener("click", ()=>{
+  const p1=parsePasted($("txtEod").value);
+  const p2=parsePasted($("txtLive").value);
+  merged=mergeAll(p1.eod, p2.live);
+  fillTable();
+});
+</script>
+</body>
+</html>
