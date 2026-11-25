@@ -45,14 +45,15 @@
   th { color:var(--dim); font-weight:normal; font-size:12px; }
   td input { width:84px; padding:6px; border-radius:8px; border:1px solid var(--line); background:#11181f; color:var(--txt); font-size:15px; text-align:center; }
   td input.missing { border-color:var(--warn); }
-  .src { font-size:11px; color:var(--dim); }
+  td input.uncertain { border-color:var(--warn); background:rgba(245,166,35,.08); }
   .check { font-size:13px; padding:8px 10px; border-radius:10px; margin-top:10px; display:none; line-height:1.5; }
   .check.bad { display:block; background:rgba(239,100,97,.12); color:var(--bad); border:1px solid var(--bad); }
   .check.good { display:block; background:rgba(53,196,141,.12); color:var(--ok); border:1px solid var(--ok); }
   .out {
     direction:ltr; text-align:left; background:#11181f; border:1px solid var(--line); border-radius:10px;
-    padding:10px; font-size:13px; word-break:break-all; margin-top:8px; font-family:monospace;
+    padding:10px; font-size:13px; word-break:break-all; margin-top:8px; font-family:monospace; white-space:pre-wrap;
   }
+  .out.rtl { direction:unset; text-align:left; }
   .histrow { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .histlist { direction:ltr; text-align:left; font-family:monospace; font-size:12px; color:var(--dim); max-height:180px; overflow:auto; margin-top:8px; white-space:pre-wrap; }
   .btns { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
@@ -64,7 +65,7 @@
 <body>
 <div class="wrap">
   <h1>تقرير ضيافة اليومي</h1>
-  <div class="sub">ارفع صورة تقرير نهاية اليوم وصورة شاشة Summary Sales، راجع الأرقام، وانسخ الصف جاهز للإكسيل.</div>
+  <div class="sub">ارفع صورة تقرير نهاية اليوم وصورة شاشة Summary Sales، راجع الأرقام، وانسخ التقرير جاهز.</div>
 
   <div class="card">
     <h2>١) البيانات</h2>
@@ -124,12 +125,20 @@
     <div class="check" id="totalCheck"></div>
     <div class="check" id="countCheck"></div>
     <div class="btns">
-      <button class="main" id="mk" style="flex:1">اعمل الصف</button>
+      <button class="main" id="mk" style="flex:1">اعمل التقرير</button>
     </div>
-    <div class="out" id="rowOut" style="display:none"></div>
-    <div class="btns" id="rowBtns" style="display:none">
-      <button class="ghost" id="copyRow">انسخ الصف</button>
-      <button class="ghost" id="saveRow">احفظ في الأرشيف</button>
+    <div id="repWrap" style="display:none">
+      <label>تقرير المدير (كل بند في سطر)</label>
+      <div class="out" id="repOut"></div>
+      <div class="btns">
+        <button class="ghost" id="copyRep">انسخ التقرير</button>
+      </div>
+      <label>صف الإكسيل</label>
+      <div class="out" id="rowOut"></div>
+      <div class="btns">
+        <button class="ghost" id="copyRow">انسخ صف الإكسيل</button>
+        <button class="ghost" id="saveRow">احفظ في الأرشيف</button>
+      </div>
     </div>
   </div>
 
@@ -151,13 +160,14 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const BRANCHES = ["Madinaty","Arabella","Tivoli Plaza","Arkan","Zamalek","Maadi","El rehab","Green Plaza"];
+const CONF_OK = 60; // تحتها الرقم يتعلم برتقالي "اتقرت بصعوبة"
 
 /* ---------- setup: branch + date ---------- */
 $("branch").value = localStorage.getItem("df_branch") || "";
 $("branch").addEventListener("change", () => localStorage.setItem("df_branch", $("branch").value.trim()));
 (function initDate(){
   const now = new Date();
-  if (now.getHours() < 4) now.setDate(now.getDate() - 1); // التقفيلة بعد نص الليل بتاعت يوم اللي فات
+  if (now.getHours() < 4) now.setDate(now.getDate() - 1);
   const p = (x) => String(x).padStart(2,"0");
   $("date").value = `${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}`;
 })();
@@ -194,47 +204,51 @@ const firstInt=(nums)=>{const i=nums.filter(x=>!x.dec).map(x=>x.v);return i.leng
 /* ---------- OCR lines ---------- */
 function linesToRows(lines){
   return (lines||[]).filter(l=>l.text&&l.text.trim()).map(l=>{
-    const ws=(l.words||[]).filter(w=>w.text&&w.text.trim()).map(w=>({t:norm(w.text.trim()), x0:w.bbox.x0}));
+    const ws=(l.words||[]).filter(w=>w.text&&w.text.trim()).map(w=>({t:norm(w.text.trim()), x0:w.bbox.x0, y:(w.bbox.y0+w.bbox.y1)/2, conf:w.confidence||0}));
     ws.sort((a,b)=>a.x0-b.x0);
     const text=ws.length?ws.map(w=>w.t).join(" "):norm(l.text.trim());
-    return {text, sq:squash(text), nums:numsIn(text.replace(/[A-Za-z]+/g," ")), words:ws};
+    const numWs=ws.filter(w=>numsIn(w.t).length);
+    const conf=numWs.length?numWs.reduce((s,w)=>s+w.conf,0)/numWs.length:0;
+    const y=ws.length?ws.reduce((s,w)=>s+w.y,0)/ws.length:0;
+    return {text, sq:squash(text), nums:numsIn(text.replace(/[A-Za-z]+/g," ")), words:ws, conf, y};
   });
 }
 
-/* ---------- parse: end-of-day receipt (one concept per row) ---------- */
+/* ---------- parse: end-of-day receipt ---------- */
 function parseEod(rows){
   const rowBy=(pred)=>rows.find(r=>pred(r.sq));
-  const gR=rowBy(s=>s.startsWith("grosssales"));
-  const gwR=rowBy(s=>s.startsWith("grosswithoutdisc")||(s.includes("gross")&&s.includes("without")));
-  const ncR=rowBy(s=>s.startsWith("netcash"));
-  const trR=rowBy(s=>s.startsWith("transactions"));
-  const avR=rowBy(s=>s.startsWith("averagecheck"));
-  const vatR=rowBy(s=>s.startsWith("vat"));
-  let prepaid=null,prepaidN=null;
+  const out={_conf:{}};
+  const set=(k,row,fn)=>{ out[k]=row?fn(row):null; out._conf[k]=row?row.conf:0; };
+  const gR=rowBy(s=>s.startsWith("grosssales")); set("gross",gR,r=>joinAmount(r.nums));
+  const gwR=rowBy(s=>s.startsWith("grosswithoutdisc")||(s.includes("gross")&&s.includes("without"))); set("grossNoDisc",gwR,r=>joinAmount(r.nums));
+  const ncR=rowBy(s=>s.startsWith("netcash")); set("netCash",ncR,r=>joinAmount(r.nums));
+  const trR=rowBy(s=>s.startsWith("transactions")); set("transactions",trR,r=>firstInt(r.nums));
+  const avR=rowBy(s=>s.startsWith("averagecheck")); set("av",avR,r=>joinAmount(r.nums));
+  const vatR=rowBy(s=>s.startsWith("vat")); set("vat",vatR,r=>joinAmount(r.nums));
+  let prepaid=null,prepaidN=null,pConf=0;
   const cIdx=rows.findIndex(r=>r.sq.includes("curr"));
-  if(cIdx>=0){ const ns=[...rows[cIdx].nums, ...(rows[cIdx+1]?rows[cIdx+1].nums:[])]; prepaid=joinAmount(ns); prepaidN=firstInt(ns); }
+  if(cIdx>=0){ const ns=[...rows[cIdx].nums,...(rows[cIdx+1]?rows[cIdx+1].nums:[])]; prepaid=joinAmount(ns); prepaidN=firstInt(ns)??(ns.length?Math.round(ns[0].v):null); pConf=Math.min(rows[cIdx].conf, rows[cIdx+1]?rows[cIdx+1].conf:rows[cIdx].conf); }
+  out.prepaid=prepaid; out.prepaidN=prepaidN; out._conf.prepaid=pConf; out._conf.prepaidN=pConf;
   let visaSum=null;
   const vIdx=rows.findIndex(r=>r.sq.includes("visaorders")||(r.sq.startsWith("visa")&&r.sq.includes("orders")));
-  if(vIdx>=0 && rows[vIdx+1]) visaSum=joinAmount(rows[vIdx+1].nums);
-  const tgR=rowBy(s=>s.includes("togo")&&s.includes("amount"));
+  if(vIdx>=0&&rows[vIdx+1]) visaSum=joinAmount(rows[vIdx+1].nums);
+  out.visaSum=visaSum;
   const cntOf=(row)=>{ if(!row) return null; const i=firstInt(row.nums); if(i!=null) return i; return row.nums.length?Math.round(row.nums[0].v):null; };
+  const tgR=rowBy(s=>s.includes("togo")&&s.includes("amount"));
   let togo=null,togoN=null;
   if(tgR){ togo=joinAmount(tgR.nums); const rest=tgR.nums.filter(x=>x.v!==togo); if(rest.length) togoN=Math.round(rest[0].v);
     if(togoN==null){ const c=cntOf(rows[rows.indexOf(tgR)+1]); if(c!=null&&c<500) togoN=c; } }
+  out.togo=togo; out.togoN=togoN; out._conf.togo=tgR?tgR.conf:0; out._conf.togoN=tgR?tgR.conf:0;
   const dlR=rowBy(s=>s.includes("delivery")&&s.includes("amount"));
   let delivery=null,deliveryN=null;
   if(dlR){ delivery=joinAmount(dlR.nums); const rest=dlR.nums.filter(x=>x.v!==delivery); if(rest.length) deliveryN=Math.round(rest[rest.length-1].v);
     if(deliveryN==null){ const c=cntOf(rows[rows.indexOf(dlR)+1]); if(c!=null&&c<500) deliveryN=c; } }
-  const headerBranch=rows.length>1 && !/\d/.test(rows[1].text)?rows[1].text.replace(/[^A-Za-z ]/g,"").trim():null;
-  return {
-    gross:gR?joinAmount(gR.nums):null, grossNoDisc:gwR?joinAmount(gwR.nums):null,
-    netCash:ncR?joinAmount(ncR.nums):null, transactions:trR?firstInt(trR.nums):null,
-    av:avR?joinAmount(avR.nums):null, vat:vatR?joinAmount(vatR.nums):null,
-    prepaid, prepaidN, visaSum, togo, togoN, delivery, deliveryN, headerBranch,
-  };
+  out.delivery=delivery; out.deliveryN=deliveryN; out._conf.delivery=dlR?dlR.conf:0; out._conf.deliveryN=dlR?dlR.conf:0;
+  out.headerBranch=rows.length>1&&!/\d/.test(rows[1].text)?rows[1].text.replace(/[^A-Za-z ]/g,"").trim():null;
+  return out;
 }
 
-/* ---------- parse: live screen (two columns) ---------- */
+/* ---------- parse: live screen ---------- */
 function liveGrab(rows, wordPreds){
   for(const r of rows){
     for(let i=0;i<r.words.length;i++){
@@ -242,39 +256,37 @@ function liveGrab(rows, wordPreds){
       const two=i+1<r.words.length?one+squash(r.words[i+1].t):one;
       if(wordPreds.some(p=>one.startsWith(p)||two.startsWith(p))){
         const start=(wordPreds.some(p=>two.startsWith(p))&&!wordPreds.some(p=>one.startsWith(p)))?i+2:i+1;
-        const out=[]; let started=false, gap=0;
+        const out=[]; let started=false, gap=0, confSum=0, confN=0;
         for(let j=start;j<r.words.length;j++){
           const ns=numsIn(r.words[j].t);
-          if(ns.length){ out.push(...ns); started=true; }
+          if(ns.length){ out.push(...ns); started=true; confSum+=r.words[j].conf; confN++; }
           else { if(started) break; if(++gap>4) break; }
         }
-        if(out.length) return out;
+        if(out.length) return {nums:out, conf:confN?confSum/confN:r.conf};
       }
     }
   }
   return null;
 }
 function parseLive(rows){
-  const num=(ns)=>ns?joinAmount(ns):null;
-  const cnt=(ns)=>{ if(!ns)return null; const a=joinAmount(ns); const rest=ns.filter(x=>x.v!==a).map(x=>Math.round(x.v)); return rest.length?rest[rest.length-1]:null; };
-  return {
-    visa:num(liveGrab(rows,["visa"])), master:num(liveGrab(rows,["master"])), dinners:num(liveGrab(rows,["dinner"])),
-    carryOut:num(liveGrab(rows,["carryout","caryout","carry","cary"])), carryOutN:cnt(liveGrab(rows,["carryout","caryout","carry","cary"])),
-    carService:num(liveGrab(rows,["carse"])), carServiceN:cnt(liveGrab(rows,["carse"])),
-  };
+  const num=(g)=>g?joinAmount(g.nums):null;
+  const cnt=(g)=>{ if(!g)return null; const a=joinAmount(g.nums); const rest=g.nums.filter(x=>x.v!==a).map(x=>Math.round(x.v)); return rest.length?rest[rest.length-1]:null; };
+  const vi=liveGrab(rows,["visa"]), ma=liveGrab(rows,["master"]), di=liveGrab(rows,["dinner"]);
+  const co=liveGrab(rows,["carryout","caryout","carry","cary"]), cs=liveGrab(rows,["carse"]);
+  return { visa:num(vi), master:num(ma), dinners:num(di), carryOut:num(co), carryOutN:cnt(co), carService:num(cs), carServiceN:cnt(cs),
+    _conf:{visa:vi?vi.conf:0, master:ma?ma.conf:0, dinners:di?di.conf:0, carryOut:co?co.conf:0, carryOutN:co?co.conf:0, carService:cs?cs.conf:0, carServiceN:cs?cs.conf:0} };
 }
 
-/* ---------- pasted text (lesson 13 format: Name,amount[,count]) ---------- */
+/* ---------- pasted text (lesson 13 format) ---------- */
 function parsePasted(text){
   const d={};
   for(const line of norm(text).split(/\n+/)){
     const parts=line.split(",");
     if(parts.length<2) continue;
-    const name=parts[0].trim();
     const amount=parseFloat(parts[1]);
     if(isNaN(amount)) continue;
     const count=parts.length>2 && parts[2].trim()!=="" ? parseInt(parts[2],10) : null;
-    d[squash(name)]={amount, count};
+    d[squash(parts[0].trim())]={amount, count};
   }
   const g=(...ks)=>{ for(const k of ks){ if(d[k]) return d[k]; } return null; };
   return {
@@ -288,6 +300,7 @@ function parsePasted(text){
       prepaid:(g("ccurrency","ourcurrency")||{}).amount ?? null,
       prepaidN:(g("ccurrency","ourcurrency")||{count:null}).count ?? null,
       visaSum:null, togo:null, togoN:null, delivery:null, deliveryN:null, headerBranch:null,
+      _conf:{},
     },
     live:{
       visa:(g("visa")||{}).amount ?? null,
@@ -297,33 +310,70 @@ function parsePasted(text){
       carryOutN:(g("carryout")||{count:null}).count ?? null,
       carService:(g("carservice")||{}).amount ?? null,
       carServiceN:(g("carservice")||{count:null}).count ?? null,
+      _conf:{},
     },
   };
 }
 
-/* ---------- merge ---------- */
+/* ---------- merge + candidate selection ---------- */
 function mergeAll(eod, live){
+  const conf={};
+  for(const k of ["gross","grossNoDisc","netCash","av","vat","prepaid"]) conf[k]=eod._conf[k]||0;
+  conf.transactions=eod._conf.transactions||0; conf.prepaidN=eod._conf.prepaidN||0;
+  conf.visa=live._conf.visa||0; conf.rabbit=live._conf.master||0; conf.breadfast=live._conf.dinners||0;
+  const diin=eod.togo ?? live.carryOut;
+  conf.diin=eod.togo!=null?(eod._conf.togo||0):(live._conf.carryOut||0);
+  const diinN=eod.togoN ?? live.carryOutN;
+  conf.diinN=eod.togoN!=null?(eod._conf.togoN||0):(live._conf.carryOutN||0);
+  const hd=eod.delivery ?? live.carService;
+  conf.hd=eod.delivery!=null?(eod._conf.delivery||0):(live._conf.carService||0);
+  const hdN=eod.deliveryN ?? live.carServiceN;
+  conf.hdN=eod.deliveryN!=null?(eod._conf.deliveryN||0):(live._conf.carServiceN||0);
   return {
     gross:eod.gross, grossNoDisc:eod.grossNoDisc, netCash:eod.netCash, transactions:eod.transactions,
     av:eod.av, vat:eod.vat, prepaid:eod.prepaid, prepaidN:eod.prepaidN, visaSum:eod.visaSum,
     visa:live.visa, master:live.master, dinners:live.dinners,
-    diin:eod.togo ?? live.carryOut, diinN:eod.togoN ?? live.carryOutN,
-    hd:eod.delivery ?? live.carService, hdN:eod.deliveryN ?? live.carServiceN,
-    headerBranch:eod.headerBranch,
+    diin, diinN, hd, hdN,
+    headerBranch:eod.headerBranch, _conf:conf,
   };
+}
+// اختيار أفضل مرشحين من كل المحاولات، وتوليفة الفيزا اللي بتحقق مجموع التقرير
+function pickLive(passes, visaSum){
+  const cands={visa:[],master:[],dinners:[],carryOut:[],carryOutN:[],carService:[],carServiceN:[]};
+  for(const p of passes){
+    for(const k of Object.keys(cands)) if(p[k]!=null) cands[k].push({v:p[k], conf:p._conf[k]||0});
+  }
+  const out={_conf:{}};
+  // التوليفة: جرب كل تركيبات visa/master/dinners واختار اللي مجموعها = فيزا التقرير
+  let best=null;
+  const vs=cands.visa.length?cands.visa:[{v:null,conf:0}], ms=cands.master.length?cands.master:[{v:null,conf:0}], ds=cands.dinners.length?cands.dinners:[{v:null,conf:0}];
+  for(const a of vs) for(const b of ms) for(const c of ds){
+    if(a.v==null||b.v==null||c.v==null) continue;
+    const err=visaSum!=null?Math.abs(a.v+b.v+c.v-visaSum):0;
+    const conf=(a.conf+b.conf+c.conf)/3;
+    const score=(visaSum!=null&&err>0.5?10000+err:0)-conf/100;
+    if(!best||score<best.score) best={a,b,c,score};
+  }
+  if(best){ out.visa=best.a.v; out.master=best.b.v; out.dinners=best.c.v; out._conf.visa=best.a.conf; out._conf.master=best.b.conf; out._conf.dinners=best.c.conf; }
+  else { out.visa=null; out.master=null; out.dinners=null; out._conf.visa=0; out._conf.master=0; out._conf.dinners=0; }
+  for(const k of ["carryOut","carryOutN","carService","carServiceN"]){
+    if(cands[k].length){ cands[k].sort((x,y)=>y.conf-x.conf); out[k]=cands[k][0].v; out._conf[k]=cands[k][0].conf; }
+    else { out[k]=null; out._conf[k]=0; }
+  }
+  return out;
 }
 
 /* ---------- review table ---------- */
 const FIELDS = [
   { k:"gross",       name:"Gross",              v:(m)=>m.gross,       n:(m)=>null,           cnt:false },
   { k:"grossNoDisc", name:"Gross without disc", v:(m)=>m.grossNoDisc, n:(m)=>null,           cnt:false },
-  { k:"netCash",     name:"Net Cash",           v:(m)=>m.netCash,     n:(m)=>m.transactions, cnt:true },
+  { k:"netCash",     name:"Net Cash",           v:(m)=>m.netCash,     n:(m)=>m.transactions, cnt:true,  nk:"transactions" },
   { k:"av",          name:"A.V",                v:(m)=>m.av,          n:(m)=>null,           cnt:false },
   { k:"vat",         name:"Vat",                v:(m)=>m.vat,         n:(m)=>null,           cnt:false },
   { k:"visa",        name:"VISA (داين إن)",      v:(m)=>m.visa,        n:(m)=>null,           cnt:false },
-  { k:"diin",        name:"Di.in",              v:(m)=>m.diin,        n:(m)=>m.diinN,        cnt:true },
-  { k:"hd",          name:"H.D",                v:(m)=>m.hd,          n:(m)=>m.hdN,          cnt:true },
-  { k:"prepaid",     name:"مدفوع مقدما",         v:(m)=>m.prepaid,     n:(m)=>m.prepaidN,     cnt:true },
+  { k:"diin",        name:"Di.in",              v:(m)=>m.diin,        n:(m)=>m.diinN,        cnt:true,  nk:"diinN" },
+  { k:"hd",          name:"H.D",                v:(m)=>m.hd,          n:(m)=>m.hdN,          cnt:true,  nk:"hdN" },
+  { k:"prepaid",     name:"مدفوع مقدما",         v:(m)=>m.prepaid,     n:(m)=>m.prepaidN,     cnt:true,  nk:"prepaidN" },
   { k:"rabbit",      name:"Rabbit",             v:(m)=>m.master,      n:(m)=>null,           cnt:true },
   { k:"breadfast",   name:"breadfast",          v:(m)=>m.dinners,     n:(m)=>null,           cnt:true },
 ];
@@ -333,20 +383,28 @@ function fillTable(){
   const tb=$("tbl").querySelector("tbody"); tb.innerHTML="";
   for(const f of FIELDS){
     const a=f.v(merged), n=f.n(merged);
+    const ac=merged._conf[f.k]||0, nc=f.nk?(merged._conf[f.nk]||0):100;
+    const aCls=a==null?"missing":(ac<CONF_OK?"uncertain":"");
+    const nCls=f.cnt?(n==null?(f.k==="rabbit"||f.k==="breadfast"?"":"missing"):(nc<CONF_OK?"uncertain":"")):"";
     const tr=document.createElement("tr");
     tr.innerHTML = `<td>${f.name}</td>
-      <td><input type="text" inputmode="decimal" id="a_${f.k}" value="${a==null?"":a}" ${a==null?'class="missing"':""}></td>
-      <td>${f.cnt?`<input type="text" inputmode="numeric" id="n_${f.k}" value="${n==null?"":n}" ${n==null?'class="missing"':""} placeholder="">`:""}</td>`;
+      <td><input type="text" inputmode="decimal" id="a_${f.k}" value="${a==null?"":a}" ${aCls?`class="${aCls}"`:""}></td>
+      <td>${f.cnt?`<input type="text" inputmode="numeric" id="n_${f.k}" value="${n==null?"":n}" ${nCls?`class="${nCls}"`:""}>`:""}</td>`;
     tb.appendChild(tr);
   }
-  tb.querySelectorAll("input").forEach(inp=>inp.addEventListener("input", ()=>{ inp.classList.remove("missing"); validateVisa(); }));
+  tb.querySelectorAll("input").forEach(inp=>inp.addEventListener("input", ()=>{ inp.classList.remove("missing"); inp.classList.remove("uncertain"); validateVisa(); }));
   validateVisa();
   $("resCard").style.display="block";
   $("resCard").scrollIntoView({behavior:"smooth"});
+  // الخانات المعلّمة
+  const lowConf=FIELDS.filter(f=>f.v(merged)!=null&&(merged._conf[f.k]||0)<CONF_OK).map(f=>f.name);
+  const lowConfN=FIELDS.filter(f=>f.cnt&&f.n(merged)!=null&&f.nk&&(merged._conf[f.nk]||0)<CONF_OK).map(f=>"عدد "+f.name);
+  const unsure=lowConf.concat(lowConfN);
+  if(unsure.length) $("status").textContent="الخانات البرتقالية اتقرت بصعوبة، راجعها كويس: "+unsure.join("، ");
 }
 function val(k){ const el=$("a_"+k); return el&&el.value.trim()!==""?parseFloat(el.value):null; }
-function setCheck(box, ok, okMsg, badMsg){ box.className="check "+(ok?"good":"bad"); box.textContent=(ok?"✅ ":"⚠️ ")+(ok?okMsg:badMsg); }
 function cnt(k){ const el=$("n_"+k); return el&&el.value.trim()!==""?parseFloat(el.value):null; }
+function setCheck(box, ok, okMsg, badMsg){ box.className="check "+(ok?"good":"bad"); box.textContent=(ok?"✅ ":"⚠️ ")+(ok?okMsg:badMsg); }
 function validateVisa(){
   const box=$("visaCheck");
   if(!merged || merged.visaSum==null){ box.className="check"; } else {
@@ -374,33 +432,62 @@ function validateVisa(){
   }
 }
 
-/* ---------- row building ---------- */
+/* ---------- outputs ---------- */
+const r2=(x)=>x===""?"":String(Math.round(parseFloat(x)));
+const t2=(x)=>x===""?"":String(Math.trunc(parseFloat(x))); // بدون كسر
+const raw2=(x)=>{ const f=parseFloat(x); return isNaN(f)?"":String(Math.round(f*100)/100); };
+function vv(k){ const el=$("a_"+k); return el?el.value.trim():""; }
+function cc(k){ const el=$("n_"+k); return el?el.value.trim():""; }
+
+// تقرير المدير: كل بند في سطر، بنفس تهجئته
+function buildReport(){
+  const lines=[
+    fmtDate($("date").value),
+    $("branch").value.trim(),
+    `Gross (${r2(vv("gross"))})`,
+    `Gross without disc(${t2(vv("grossNoDisc"))})`,
+    `Net Cah (${r2(vv("netCash"))})`,
+    `T.c (${cc("netCash")})`,
+    `A.V(${t2(vv("av"))})`,
+    `Vat (${r2(vv("vat"))})`,
+    `VlSA (${r2(vv("visa"))})`,
+    `Di.in(${r2(vv("diin"))})`,
+    `T.C (${cc("diin")})`,
+    `H.D(${r2(vv("hd"))})`,
+    `T.c(${cc("hd")})`,
+    `مدفوع مقدما(${r2(vv("prepaid"))})(${cc("prepaid")})`,
+    `Rabbit(${r2(vv("rabbit"))})`,
+    `T.C(${cc("rabbit")})`,
+    `تحميل علي رابيت (0)`,
+    `breadfast(${r2(vv("breadfast"))})`,
+    `T.c(${cc("breadfast")})`,
+    `وفرها(0)(0)`,
+  ];
+  return lines.join("\n");
+}
+// صف الإكسيل زي ما هو
 function buildRow(){
-  const v=(k)=>{ const el=$("a_"+k); return el?el.value.trim():""; };
-  const c=(k)=>{ const el=$("n_"+k); return el?el.value.trim():""; };
-  const r=(x)=>x===""?"":String(Math.round(parseFloat(x)));
-  const raw=(x)=>{ const f=parseFloat(x); return isNaN(f)?"":String(Math.round(f*100)/100); };
   const cells=[
     fmtDate($("date").value),
     $("branch").value.trim(),
-    r(v("gross")),
-    r(v("grossNoDisc")),
-    `${r(v("netCash"))} (${c("netCash")})`,
-    raw(v("av")),
-    r(v("vat")),
-    r(v("visa")),
-    `${r(v("diin"))} (${c("diin")})`,
-    `${r(v("hd"))} (${c("hd")})`,
-    `${r(v("prepaid"))} (${c("prepaid")})`,
-    `${r(v("rabbit"))} (${c("rabbit")})`,
-    `${r(v("breadfast"))} (${c("breadfast")})`,
+    r2(vv("gross")),
+    r2(vv("grossNoDisc")),
+    `${r2(vv("netCash"))} (${cc("netCash")})`,
+    raw2(vv("av")),
+    r2(vv("vat")),
+    r2(vv("visa")),
+    `${r2(vv("diin"))} (${cc("diin")})`,
+    `${r2(vv("hd"))} (${cc("hd")})`,
+    `${r2(vv("prepaid"))} (${cc("prepaid")})`,
+    `${r2(vv("rabbit"))} (${cc("rabbit")})`,
+    `${r2(vv("breadfast"))} (${cc("breadfast")})`,
   ];
   return cells.join(",");
 }
 $("mk").addEventListener("click", ()=>{
+  $("repOut").textContent=buildReport();
   $("rowOut").textContent=buildRow();
-  $("rowOut").style.display="block";
-  $("rowBtns").style.display="flex";
+  $("repWrap").style.display="block";
 });
 
 /* ---------- copy ---------- */
@@ -409,7 +496,8 @@ function copyText(t){
   return new Promise((res,rej)=>{ const ta=document.createElement("textarea"); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");res();}catch(e){rej(e);} ta.remove(); });
 }
 function toast(msg){ $("toast").textContent=msg; $("toast").style.display="block"; setTimeout(()=>$("toast").style.display="none",1800); }
-$("copyRow").addEventListener("click", ()=>copyText($("rowOut").textContent).then(()=>toast("اتنسخ ✅")));
+$("copyRep").addEventListener("click", ()=>copyText($("repOut").textContent).then(()=>toast("اتنسخ التقرير ✅")));
+$("copyRow").addEventListener("click", ()=>copyText($("rowOut").textContent).then(()=>toast("اتنسخ الصف ✅")));
 
 /* ---------- history ---------- */
 function hist(){ try{return JSON.parse(localStorage.getItem("df_hist")||"[]");}catch(e){return [];} }
@@ -436,40 +524,34 @@ $("clearAll").addEventListener("click", ()=>{ saveHist([]); toast("اتمسح");
 renderHist();
 
 /* ---------- OCR ---------- */
-function preprocess(file){
-  return new Promise((res,rej)=>{
-    const img=new Image();
-    img.onload=()=>{
-      const scale=Math.min(2.2, 2400/Math.max(img.width,img.height)||1, 3);
-      const s=Math.max(1,scale);
-      const c=document.createElement("canvas");
-      c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
-      const ctx=c.getContext("2d");
-      ctx.drawImage(img,0,0,c.width,c.height);
-      const d=ctx.getImageData(0,0,c.width,c.height);
-      const px=d.data;
-      const n=px.length/4;
-      const gray=new Uint8Array(n);
-      let mn=255,mx=0;
-      for(let i=0;i<n;i++){ const g=Math.round(0.299*px[i*4]+0.587*px[i*4+1]+0.114*px[i*4+2]); gray[i]=g; if(g<mn)mn=g; if(g>mx)mx=g; }
-      const range=Math.max(1,mx-mn);
-      for(let i=0;i<n;i++){ const g=Math.round((gray[i]-mn)*255/range); px[i*4]=px[i*4+1]=px[i*4+2]=g; }
-      ctx.putImageData(d,0,0);
-      res(c);
-    };
-    img.onerror=rej;
-    img.src=URL.createObjectURL(file);
-  });
+function loadImage(file){
+  return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(img); img.onerror=rej; img.src=URL.createObjectURL(file); });
+}
+function prepCanvas(img, blur){
+  const scale=Math.min(2.2, 2400/Math.max(img.width,img.height)||1, 3);
+  const s=Math.max(1,scale);
+  const c=document.createElement("canvas");
+  c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
+  const ctx=c.getContext("2d");
+  if(blur){ try{ ctx.filter="blur(1.1px)"; }catch(e){} }
+  ctx.drawImage(img,0,0,c.width,c.height);
+  try{ ctx.filter="none"; }catch(e){}
+  const d=ctx.getImageData(0,0,c.width,c.height);
+  const px=d.data; const n=px.length/4;
+  const gray=new Uint8Array(n);
+  let mn=255,mx=0;
+  for(let i=0;i<n;i++){ const g=Math.round(0.299*px[i*4]+0.587*px[i*4+1]+0.114*px[i*4+2]); gray[i]=g; if(g<mn)mn=g; if(g>mx)mx=g; }
+  const range=Math.max(1,mx-mn);
+  for(let i=0;i<n;i++){ const g=Math.round((gray[i]-mn)*255/range); px[i*4]=px[i*4+1]=px[i*4+2]=g; }
+  ctx.putImageData(d,0,0);
+  return c;
 }
 let workerP=null;
 async function getWorker(){
   if(workerP) return workerP;
   workerP=(async()=>{
-    try{
-      return await Tesseract.createWorker("eng", Tesseract.OEM?Tesseract.OEM.LSTM:1, { langPath:".", gzip:true, logger:log });
-    }catch(e){
-      return await Tesseract.createWorker("eng", 1, { logger:log });
-    }
+    try{ return await Tesseract.createWorker("eng", Tesseract.OEM?Tesseract.OEM.LSTM:1, { langPath:".", gzip:true, logger:log }); }
+    catch(e){ return await Tesseract.createWorker("eng", 1, { logger:log }); }
   })();
   return workerP;
 }
@@ -481,44 +563,98 @@ function log(m){
     $("status").textContent="بيقرا الصورة… "+p+"%";
   }
 }
-async function ocrRows(worker, canvas, psm){
-  await worker.setParameters({ tessedit_pageseg_mode: psm });
+async function ocrRows(worker, canvas, psm, whitelist){
+  const params={ tessedit_pageseg_mode: psm };
+  if(whitelist) params.tessedit_char_whitelist=whitelist;
+  await worker.setParameters(params);
   const { data } = await worker.recognize(canvas);
+  if(whitelist) await worker.setParameters({ tessedit_char_whitelist: "" });
   return { rows: linesToRows(data.lines), text: data.text||"" };
 }
+
+/* قراءة بالموقع: لو البنود اتباعدت والقراءة العادية فشلت، نحدد مكان السطر من تباعد البنود ونقراه أرقام بس */
+async function geometryRead(worker, canvas, allRows, targets){
+  // targets: [{key:"visa", idx:9}, ...] حسب ترتيب العمود اليمين في الشاشة
+  const anchorDefs=[{sq:"salestax",idx:5},{sq:"discount",idx:8},{sq:"currency",idx:13, alt:"currancy"},{sq:"carse",idx:3}];
+  const anchors=[];
+  for(const a of anchorDefs){
+    const r=allRows.find(x=>x.sq.includes(a.sq)||(a.alt&&x.sq.includes(a.alt)));
+    if(r) anchors.push({idx:a.idx, y:r.y, row:r});
+  }
+  if(anchors.length<2) return {};
+  // فرق الصفوف من أبعد مرساتين
+  anchors.sort((a,b)=>a.idx-b.idx);
+  const first=anchors[0], last=anchors[anchors.length-1];
+  if(last.idx===first.idx) return {};
+  const rowH=(last.y-first.y)/(last.idx-first.idx);
+  if(rowH<8||rowH>200) return {};
+  // نطاق عمود القيم من الكلمات الرقمية في صفوف المراسي
+  let xMin=Infinity, xMax=-Infinity;
+  for(const a of anchors){
+    for(const w of a.row.words){ if(numsIn(w.t).length){ if(w.x0<xMin)xMin=w.x0; if(w.x0>xMax)xMax=w.x0; } }
+  }
+  if(!(xMax>xMin)){ xMin=canvas.width*0.60; xMax=canvas.width*0.86; }
+  else { const pad=(xMax-xMin)*0.15+20; xMin=Math.max(0,xMin-pad); xMax=Math.min(canvas.width,xMax+pad+40); }
+  const out={};
+  for(const t of targets){
+    const y=first.y+(t.idx-first.idx)*rowH;
+    const y0=Math.max(0,Math.round(y-rowH*0.55)), y1=Math.min(canvas.height,Math.round(y+rowH*0.55));
+    if(y1-y0<10) continue;
+    const sc=document.createElement("canvas");
+    const scale=3;
+    sc.width=Math.round((xMax-xMin)*scale); sc.height=Math.round((y1-y0)*scale);
+    const sctx=sc.getContext("2d");
+    sctx.drawImage(canvas, xMin, y0, xMax-xMin, y1-y0, 0, 0, sc.width, sc.height);
+    try{
+      const r=await ocrRows(worker, sc, "7", "0123456789.,");
+      const nums=Pnums(r.text);
+      if(nums.length){ out[t.key]={v:Pjoin(nums), conf:60}; } // conf متوسط: يتعلم للمراجعة
+    }catch(e){}
+  }
+  return out;
+}
+function Pnums(text){ return numsIn(norm(text).replace(/[^\d.,\- ]/g," ")); }
+function Pjoin(nums){ return joinAmount(nums); }
 
 $("go").addEventListener("click", async ()=>{
   try{
     $("go").disabled=true;
     $("status").textContent="بنجهز الصور…";
-    const [cE,cL]=await Promise.all([preprocess(imgs.eod), preprocess(imgs.live)]);
+    const [imgE,imgL]=await Promise.all([loadImage(imgs.eod), loadImage(imgs.live)]);
+    const cE=prepCanvas(imgE,false);
+    const cL1=prepCanvas(imgL,false);
+    const cL2=prepCanvas(imgL,true);
     const worker=await getWorker();
+    // التقرير: محاولة واحدة كفاية
     const eodRes=await ocrRows(worker, cE, "6");
-    const liveRes=await ocrRows(worker, cL, "6");
-    const liveRes11=await ocrRows(worker, cL, "11");
     $("txtEod").value=eodRes.text.trim();
-    $("txtLive").value=liveRes.text.trim();
     const eod=parseEod(eodRes.rows);
-    let live=parseLive(liveRes.rows);
-    const live11=parseLive(liveRes11.rows);
-    for(const k of Object.keys(live11)) if(live[k]==null) live[k]=live11[k];
-    // لو مجموع الفيزا مش مظبوط مع قراءة PSM6، جرب مرشح PSM11
-    let m=mergeAll(eod,live);
-    const bad=(mm)=>mm.visaSum!=null&&mm.visa!=null&&mm.master!=null&&mm.dinners!=null&&Math.abs(mm.visa+mm.master+mm.dinners-mm.visaSum)>0.5;
-    if(bad(m) && live11.visa!=null && live11.visa!==live.visa){
-      const alt=mergeAll(eod,{...live,visa:live11.visa});
-      if(!bad(alt)) m=alt;
+    // الشاشة: ٣ محاولات قراءة + دمج
+    const passes=[];
+    const p1=await ocrRows(worker, cL1, "6"); passes.push(parseLive(p1.rows));
+    $("txtLive").value=p1.text.trim();
+    const p2=await ocrRows(worker, cL2, "6"); passes.push(parseLive(p2.rows));
+    const p3=await ocrRows(worker, cL1, "11"); passes.push(parseLive(p3.rows));
+    let live=pickLive(passes, eod.visaSum);
+    // لو لسه فيه قيم ناقصة من الشاشة: جرب القراءة بالموقع
+    const missing=["visa","master","dinners"].filter(k=>live[k]==null);
+    if(missing.length){
+      const allRows=p1.rows.concat(p2.rows, p3.rows);
+      const geo=await geometryRead(worker, cL1, allRows, [
+        {key:"visa",idx:9},{key:"master",idx:10},{key:"dinners",idx:11},{key:"carryOut",idx:0},
+      ].filter(t=>missing.includes(t.key)||(t.key==="carryOut"&&live.carryOut==null)));
+      for(const k of Object.keys(geo)){ if(live[k]==null){ live[k]=geo[k].v; live._conf[k]=geo[k].conf; } }
     }
-    merged=m;
-    // الفرع من أول التقرير
-    if(m.headerBranch && !$("branch").value.trim()){
-      const hs=squash(m.headerBranch);
+    merged=mergeAll(eod, live);
+    if(merged.headerBranch && !$("branch").value.trim()){
+      const hs=squash(merged.headerBranch);
       const found=BRANCHES.find(b=>hs.startsWith(squash(b))||squash(b).startsWith(hs));
       if(found){ $("branch").value=found; localStorage.setItem("df_branch",found); }
     }
     fillTable();
-    const missing=FIELDS.filter(f=>f.v(merged)==null).map(f=>f.name);
-    $("status").textContent = missing.length ? "راجع الأرقام تحت 👇 الخانات المعلّمة مش مقروءة، اكتبها بإيدك." : "راجع الأرقام تحت 👇";
+    const miss=FIELDS.filter(f=>f.v(merged)==null).map(f=>f.name);
+    if(miss.length) $("status").textContent="راجع الأرقام تحت 👇 الخانات الفاضية اكتبها بإيدك من الشاشة.";
+    else if(!$("status").textContent.includes("بصعوبة")) $("status").textContent="راجع الأرقام تحت 👇";
   }catch(e){
     $("status").textContent="حصلت مشكلة في القراءة. جرب الصق النص من الملخص تحت.";
   }finally{
