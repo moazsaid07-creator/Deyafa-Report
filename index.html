@@ -49,6 +49,7 @@
   .check { font-size:13px; padding:8px 10px; border-radius:10px; margin-top:10px; display:none; line-height:1.5; }
   .check.bad { display:block; background:rgba(239,100,97,.12); color:var(--bad); border:1px solid var(--bad); }
   .check.good { display:block; background:rgba(53,196,141,.12); color:var(--ok); border:1px solid var(--ok); }
+  .check.warn { display:block; background:rgba(245,166,35,.10); color:var(--warn); border:1px solid var(--warn); }
   .out {
     direction:ltr; text-align:left; background:#11181f; border:1px solid var(--line); border-radius:10px;
     padding:10px; font-size:13px; word-break:break-all; margin-top:8px; font-family:monospace; white-space:pre-wrap;
@@ -64,7 +65,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>تقرير ضيافة اليومي <span style="font-size:11px;color:var(--dim)">v3</span></h1>
+  <h1>تقرير ضيافة اليومي <span style="font-size:11px;color:var(--dim)">v4</span></h1>
   <div class="sub">ارفع صورة تقرير نهاية اليوم وصورة شاشة Summary Sales، راجع الأرقام، وانسخ التقرير جاهز.</div>
 
   <div class="card">
@@ -101,6 +102,12 @@
     <label class="filebtn" for="imgLive" id="btnLive">اضغط لاختيار الصورة</label>
     <input type="file" id="imgLive" accept="image/*">
     <img class="prev" id="prevLive" alt="">
+    <details>
+      <summary>مفتاح جوجل للقراءة الذكية (بيتحفظ على موبايلك بس، مش بيتبعت لحد)</summary>
+      <label>Google AI Studio key</label>
+      <input type="text" id="gkey" placeholder="AIza..." autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid var(--line);background:#11181f;color:var(--txt);direction:ltr;text-align:left;font-family:monospace">
+      <div class="tips">بالمفتاح: جوجل بيقرا الصورتين وبيستخرج الأرقام (الصور بتروح لجوجل). من غيره: قراءة محلية على الموبايل، أضعف مع الميل والإضاءة. في الحالتين فيه معادلات بتكشف أي رقم غلط تحت.</div>
+    </details>
     <button class="main" id="go" disabled>اطلع الأرقام من الصور</button>
     <div class="prog" id="prog"><div></div></div>
     <div class="status" id="status"></div>
@@ -125,6 +132,9 @@
       <thead><tr><th>الخانة</th><th>المبلغ</th><th>العدد</th></tr></thead>
       <tbody></tbody>
     </table>
+    <div class="check" id="cashCheck"></div>
+    <div class="check" id="grossCheck"></div>
+    <div class="check" id="vatCheck"></div>
     <div class="check" id="visaCheck"></div>
     <div class="check" id="totalCheck"></div>
     <div class="check" id="countCheck"></div>
@@ -169,6 +179,8 @@ const CONF_OK = 60; // تحتها الرقم يتعلم برتقالي "اتقر
 /* ---------- setup: branch + date ---------- */
 $("branch").value = localStorage.getItem("df_branch") || "";
 $("branch").addEventListener("change", () => localStorage.setItem("df_branch", $("branch").value.trim()));
+$("gkey").value = localStorage.getItem("df_gkey") || "";
+$("gkey").addEventListener("change", () => localStorage.setItem("df_gkey", $("gkey").value.trim()));
 (function initDate(){
   const now = new Date();
   if (now.getHours() < 4) now.setDate(now.getDate() - 1);
@@ -237,6 +249,7 @@ function parseEod(rows){
   const vIdx=rows.findIndex(r=>r.sq.includes("visaorders")||(r.sq.startsWith("visa")&&r.sq.includes("orders")));
   if(vIdx>=0&&rows[vIdx+1]) visaSum=joinAmount(rows[vIdx+1].nums);
   out.visaSum=visaSum;
+  out._conf.visaSum=(vIdx>=0&&rows[vIdx+1])?rows[vIdx+1].conf:0;
   const cntOf=(row)=>{ if(!row) return null; const i=firstInt(row.nums); if(i!=null) return i; return row.nums.length?Math.round(row.nums[0].v):null; };
   const tgR=rowBy(s=>s.includes("togo")&&s.includes("amount"));
   let togo=null,togoN=null;
@@ -324,6 +337,7 @@ function mergeAll(eod, live){
   const conf={};
   for(const k of ["gross","grossNoDisc","netCash","av","vat","prepaid"]) conf[k]=eod._conf[k]||0;
   conf.transactions=eod._conf.transactions||0; conf.prepaidN=eod._conf.prepaidN||0;
+  conf.visaSum=eod._conf.visaSum||0;
   conf.visa=live._conf.visa||0; conf.rabbit=live._conf.master||0; conf.breadfast=live._conf.dinners||0;
   const diin=eod.togo ?? live.carryOut;
   conf.diin=eod.togo!=null?(eod._conf.togo||0):(live._conf.carryOut||0);
@@ -333,12 +347,16 @@ function mergeAll(eod, live){
   conf.hd=eod.delivery!=null?(eod._conf.delivery||0):(live._conf.carService||0);
   const hdN=eod.deliveryN ?? live.carServiceN;
   conf.hdN=eod.deliveryN!=null?(eod._conf.deliveryN||0):(live._conf.carServiceN||0);
+  const fixed={};
+  for(const k of Object.keys(eod._fixed||{})) fixed[k]=true;
+  if(live._fixed){ if(live._fixed.visa)fixed.visa=true; if(live._fixed.master)fixed.rabbit=true; if(live._fixed.dinners)fixed.breadfast=true; }
   return {
     gross:eod.gross, grossNoDisc:eod.grossNoDisc, netCash:eod.netCash, transactions:eod.transactions,
     av:eod.av, vat:eod.vat, prepaid:eod.prepaid, prepaidN:eod.prepaidN, visaSum:eod.visaSum,
     visa:live.visa, master:live.master, dinners:live.dinners,
     diin, diinN, hd, hdN,
-    headerBranch:eod.headerBranch, _conf:conf,
+    headerBranch:eod.headerBranch, _conf:conf, _fixed:fixed,
+    _c1ok:!!eod._c1ok, _c4ok:!!eod._c4ok, _rcFixed:!!eod._fixedAny, _liveNote:live._note||"",
   };
 }
 // البقع العشرية اللي OCR بياكلها: نولّد احتمالات إدخال نقطة عشرية أو رقم 1 ضاع من الأول
@@ -361,7 +379,20 @@ function pickLive(passes, visaSum){
   for(const p of passes){
     for(const k of Object.keys(cands)) if(p[k]!=null) cands[k].push({v:p[k], conf:p._conf[k]||0});
   }
-  const out={_conf:{}, _note:""};
+  const out={_conf:{}, _note:"", _fixed:{}};
+  // مفيش مرجع موثوق للفيزا: من غير تصحيح ولا اشتقاق — كل خانة بأعلى قراءة خام بس
+  if(visaSum==null){
+    for(const k of ["visa","master","dinners"]){
+      if(cands[k].length){ cands[k].sort((x,y)=>y.conf-x.conf); out[k]=cands[k][0].v; out._conf[k]=cands[k][0].conf; }
+      else { out[k]=null; out._conf[k]=0; }
+      out._fixed[k]=false;
+    }
+    for(const k of ["carryOut","carryOutN","carService","carServiceN"]){
+      if(cands[k].length){ cands[k].sort((x,y)=>y.conf-x.conf); out[k]=cands[k][0].v; out._conf[k]=cands[k][0].conf; }
+      else { out[k]=null; out._conf[k]=0; }
+    }
+    return out;
+  }
   const FIXED=55; // ثقة الرقم المصحّح بالمعادلة: تتحط تحت الحد عشان يتعلم برتقالي
   const varList=(k)=>{
     const seen=new Map();
@@ -402,17 +433,20 @@ function pickLive(passes, visaSum){
   }
   const notes=[];
   const take=(name,slot,derivedHere)=>{
-    if(derivedHere){ notes.push(name+(best.corro?" اتأكدت":" اشتُقّت")+" من المعادلة ("+best.resid+")"); return {v:best.resid, conf:best.corro?55:45}; }
-    if(slot.v==null) return {v:null, conf:0};
-    if(best.ok && slot.fix){ notes.push(name+" "+slot.orig+" → "+slot.v); return {v:slot.v, conf:slot.conf}; }
-    return {v:slot.orig, conf:slot.oconf};
+    if(derivedHere){ notes.push(name+(best.corro?" اتأكدت":" اشتُقّت")+" من المعادلة ("+best.resid+")"); return {v:best.resid, conf:best.corro?55:45, fixed:true}; }
+    if(slot.v==null) return {v:null, conf:0, fixed:false};
+    if(best.ok && slot.fix){ notes.push(name+" "+slot.orig+" → "+slot.v); return {v:slot.v, conf:slot.conf, fixed:true}; }
+    return {v:slot.orig, conf:slot.oconf, fixed:false};
   };
+  out._fixed={};
   if(best){
     const A=take("visa",best.a,best.derived==="visa");
     const B=take("master",best.b,best.derived==="master");
     const C=take("dinners",best.c,best.derived==="dinners");
-    out.visa=A.v; out._conf.visa=A.conf; out.master=B.v; out._conf.master=B.conf; out.dinners=C.v; out._conf.dinners=C.conf;
-  } else { out.visa=out.master=out.dinners=null; out._conf.visa=out._conf.master=out._conf.dinners=0; }
+    out.visa=A.v; out._conf.visa=A.conf; out._fixed.visa=A.fixed;
+    out.master=B.v; out._conf.master=B.conf; out._fixed.master=B.fixed;
+    out.dinners=C.v; out._conf.dinners=C.conf; out._fixed.dinners=C.fixed;
+  } else { out.visa=out.master=out.dinners=null; out._conf.visa=out._conf.master=out._conf.dinners=0; out._fixed.visa=out._fixed.master=out._fixed.dinners=false; }
   for(const k of ["carryOut","carryOutN","carService","carServiceN"]){
     if(cands[k].length){ cands[k].sort((x,y)=>y.conf-x.conf); out[k]=cands[k][0].v; out._conf[k]=cands[k][0].conf; }
     else { out[k]=null; out._conf[k]=0; }
@@ -421,10 +455,11 @@ function pickLive(passes, visaSum){
   return out;
 }
 // معادلات التقرير: Di.in+H.D = Gross without disc، والأعداد = Transactions
+// التصحيح مسموح بس لو المرجع نفسه متأكد من معادلة مستقلة (C1/C4)
 function equationFix(m){
   const notes=[];
   const g=m.grossNoDisc;
-  if(g!=null){
+  if(g!=null && m._c1ok){
     const a=m.diin, b=m.hd;
     if(a!=null && b!=null && Math.abs(a+b-g)>0.05){
       let hit=null, hitLoose=null;
@@ -439,26 +474,72 @@ function equationFix(m){
         notes.push(`diin ${a}→${use.x}، hd ${b}→${use.y}`);
         m.diin=use.x; m.hd=use.y;
         m._conf.diin=Math.min(m._conf.diin||99,55); m._conf.hd=Math.min(m._conf.hd||99,55);
+        m._fixed.diin=true; m._fixed.hd=true;
       }
     } else if((a==null)!==(b==null)){
       const known=a!=null?a:b; const miss=a!=null?"hd":"diin";
       const r=Math.round((g-known)*100)/100;
-      if(r>0 && r<=g){ m[miss]=r; m._conf[miss]=50; notes.push(miss+" اشتُقّت ("+r+")"); }
+      if(r>0 && r<=g){ m[miss]=r; m._conf[miss]=50; m._fixed[miss]=true; notes.push(miss+" اشتُقّت ("+r+")"); }
     }
   }
   const t=m.transactions;
   if(t!=null){
     const a=m.diinN, b=m.hdN;
     if((a==null)!==(b==null)){
-      const known=a!=null?a:b; const miss=a!=null?"hdN":"diinN";
-      const r=t-known;
-      if(r>=0 && r<1000){ m[miss]=r; m._conf[miss]=50; notes.push("عدد "+miss+" اشتُقّ ("+r+")"); }
+      if(m._c4ok){
+        const known=a!=null?a:b; const miss=a!=null?"hdN":"diinN";
+        const r=t-known;
+        if(r>=0 && r<1000){ m[miss]=r; m._conf[miss]=50; m._fixed[miss]=true; notes.push("عدد "+miss+" اشتُقّ ("+r+")"); }
+      }
     } else if(a!=null && b!=null && a+b!==t){
       // مش عارفين أنهي واحد غلط: علّم الاتنين للمراجعة
       m._conf.diinN=Math.min(m._conf.diinN||99,45); m._conf.hdN=Math.min(m._conf.hdN||99,45);
       notes.push(`أعداد الأوردرات مش مطابقة (${a}+${b}≠${t})`);
     }
   }
+  return notes;
+}
+// فحص الإيصال بمعادلات مستقلة عن الشاشة: يصحّح لو لقى حل بإذن الله، ويحدد لو المراجع موثوقة
+// applyFixes=false للنص الملصوق (بنكتبش على إدخال اليوزر، بس بنحسب الثقة)
+function receiptTrust(e, applyFixes=true){
+  const notes=[];
+  e._fixed={}; e._fixedAny=false;
+  // C4: A.V × عدد الأوردرات ≈ Gross — يكشف نقطة عشرية ضاعت من Gross
+  if(e.gross!=null && e.av!=null && e.transactions!=null){
+    const target=e.av*e.transactions;
+    if(Math.abs(e.gross-target)>2.0 && applyFixes){
+      let hit=null;
+      for(const x of dotVariants(e.gross)){ const err=Math.abs(x-target); if(err<=2.0&&(!hit||err<hit.err)) hit={x,err}; }
+      if(hit){
+        notes.push(`gross ${e.gross}→${hit.x}`);
+        e.gross=hit.x; e._conf.gross=Math.min(e._conf.gross||99,55); e._fixed.gross=true; e._fixedAny=true;
+      }
+    }
+  }
+  e._c4ok = e.gross!=null && e.av!=null && e.transactions!=null && Math.abs(e.av*e.transactions-e.gross)<=2.0;
+  // C1: Net Cash + فيزا التقرير + المدفوع = Gross without disc — ده اللي بيثبت إن فيزا التقرير مظبوطة
+  if(e.netCash!=null && e.visaSum!=null && e.prepaid!=null && e.grossNoDisc!=null){
+    const err0=Math.abs(e.netCash+e.visaSum+e.prepaid-e.grossNoDisc);
+    if(err0>0.5 && applyFixes){
+      let best=null;
+      for(const nc of dotVariants(e.netCash)) for(const vs of dotVariants(e.visaSum)) for(const pp of dotVariants(e.prepaid)) for(const gw of dotVariants(e.grossNoDisc)){
+        const err=Math.abs(nc+vs+pp-gw);
+        const fixes=(nc!==e.netCash)+(vs!==e.visaSum)+(pp!==e.prepaid)+(gw!==e.grossNoDisc);
+        const score=err<=0.05 ? fixes*100+err : 1000000+err*10+fixes*50;
+        if(!best||score<best.score) best={nc,vs,pp,gw,err,fixes,score};
+      }
+      if(best && best.err<=0.05 && best.fixes>0){
+        if(best.nc!==e.netCash){notes.push(`netCash ${e.netCash}→${best.nc}`);e.netCash=best.nc;e._conf.netCash=Math.min(e._conf.netCash||99,55);e._fixed.netCash=true;}
+        if(best.vs!==e.visaSum){notes.push(`visaSum ${e.visaSum}→${best.vs}`);e.visaSum=best.vs;e._conf.visaSum=55;e._fixed.visaSum=true;}
+        if(best.pp!==e.prepaid){notes.push(`prepaid ${e.prepaid}→${best.pp}`);e.prepaid=best.pp;e._conf.prepaid=Math.min(e._conf.prepaid||99,55);e._fixed.prepaid=true;}
+        if(best.gw!==e.grossNoDisc){notes.push(`grossNoDisc ${e.grossNoDisc}→${best.gw}`);e.grossNoDisc=best.gw;e._conf.grossNoDisc=Math.min(e._conf.grossNoDisc||99,55);e._fixed.grossNoDisc=true;}
+        e._fixedAny=true;
+      }
+    }
+    e._c1ok = Math.abs(e.netCash+e.visaSum+e.prepaid-e.grossNoDisc)<=0.5
+      || (Number.isInteger(e.grossNoDisc) && Math.abs(e.netCash+e.visaSum+e.prepaid-e.grossNoDisc)<1); // Gross without disc ممكن يتقري من غير كسره
+    if(e._c1ok && Math.abs(e.netCash+e.visaSum+e.prepaid-e.grossNoDisc)>0.5){ e._conf.visaSum=Math.min(e._conf.visaSum||99,55); }
+  } else e._c1ok=false;
   return notes;
 }
 
@@ -491,7 +572,15 @@ function fillTable(){
       <td>${f.cnt?`<input type="text" inputmode="numeric" id="n_${f.k}" value="${n==null?"":n}" ${nCls?`class="${nCls}"`:""}>`:""}</td>`;
     tb.appendChild(tr);
   }
-  tb.querySelectorAll("input").forEach(inp=>inp.addEventListener("input", ()=>{ inp.classList.remove("missing"); inp.classList.remove("uncertain"); validateVisa(); }));
+  tb.querySelectorAll("input").forEach(inp=>inp.addEventListener("input", ()=>{
+    inp.classList.remove("missing"); inp.classList.remove("uncertain");
+    // رقم اتكتب بإيدك: يعتبر متأكد منه، وميتعلمش كتصحيح
+    const id=inp.id;
+    const nkMap={n_netcash:"transactions", n_netCash:"transactions", n_diin:"diinN", n_hd:"hdN", n_prepaid:"prepaidN"};
+    const key=id.startsWith("a_")?id.slice(2):(nkMap[id]||id.slice(2));
+    if(merged){ merged._conf[key]=100; if(merged._fixed) merged._fixed[key]=false; }
+    validateVisa();
+  }));
   validateVisa();
   $("resCard").style.display="block";
   $("resCard").scrollIntoView({behavior:"smooth"});
@@ -504,31 +593,73 @@ function fillTable(){
 function val(k){ const el=$("a_"+k); return el&&el.value.trim()!==""?parseFloat(el.value):null; }
 function cnt(k){ const el=$("n_"+k); return el&&el.value.trim()!==""?parseFloat(el.value):null; }
 function setCheck(box, ok, okMsg, badMsg){ box.className="check "+(ok?"good":"bad"); box.textContent=(ok?"✅ ":"⚠️ ")+(ok?okMsg:badMsg); }
+// participant من خانات الجدول: القيمة الحالية + هل مصدرها موثوق (قراءة خام بثقة عالية ولا تصحيح/اشتقاق)
+function PT(inputKey, confKey, isCnt){
+  const v=isCnt?cnt(inputKey):val(inputKey);
+  return { v, clean:((merged._conf[confKey]||0)>=CONF_OK && !(merged._fixed&&merged._fixed[confKey])) };
+}
+// ok=true مع كل القيم خام → أخضر، ok=true مع أي قيمة متصححة/مشتقة/ضعيفة → أصفر، ok=false → أحمر
+function showCheck(id, parts, ok, cleanMsg, touchedMsg, badMsg){
+  const box=$(id);
+  if(parts.some(p=>p.v==null)){ box.className="check"; return; }
+  if(!ok){ box.className="check bad"; box.textContent="⚠️ "+badMsg; return; }
+  if(parts.every(p=>p.clean)){ box.className="check good"; box.textContent="✅ "+cleanMsg; }
+  else { box.className="check warn"; box.textContent="🟡 "+touchedMsg; }
+}
 function validateVisa(){
+  if(!merged) return;
+  const f2=(x)=>Math.round(x*100)/100;
+  const vs0=merged.visaSum;
+  // C1: الإيصال متسق داخليا؟ (ده اللي بيثبت إن فيزا التقرير نفسها اتقرت صح)
+  const nc=val("netCash"), pp=val("prepaid"), gwd=val("grossNoDisc");
+  const vsPart={v:vs0, clean:((merged._conf.visaSum||0)>=CONF_OK && !(merged._fixed&&merged._fixed.visaSum))};
+  const c1Parts=[PT("netCash","netCash"), vsPart, PT("prepaid","prepaid"), PT("grossNoDisc","grossNoDisc")];
+  const c1Live=(vs0!=null&&nc!=null&&pp!=null&&gwd!=null) ? (Math.abs(nc+vs0+pp-gwd)<=0.5 || (Number.isInteger(gwd)&&Math.abs(nc+vs0+pp-gwd)<1)) : false;
+  showCheck("cashCheck", c1Parts, c1Live,
+    `الإيصال متسق: ${f2(nc)} + ${f2(vs0)} + ${f2(pp)} = ${f2(gwd)} ✓ فيزا التقرير مؤكدة`,
+    `الإيصال اتسق بعد تصحيح آلي — راجع الخانات البرتقالية من الصورة قبل ما تكمّل`,
+    `الإيصال مش متسق: Net Cash (${nc}) + فيزا التقرير (${vs0}) + المدفوع (${pp}) = ${f2((nc||0)+(vs0||0)+(pp||0))}، مش Gross without disc (${gwd}). فيه رقم من الإيصال اتقري غلط — صلّحه من الصورة الأول.`);
+  // C4: A.V × عدد الأوردرات ≈ Gross
+  const gr=val("gross"), av=val("av"), trn=cnt("netCash");
+  const c4ok=(gr!=null&&av!=null&&trn!=null) ? Math.abs(av*trn-gr)<=2.0 : false;
+  showCheck("grossCheck", [PT("gross","gross"),PT("av","av"),PT("netCash","transactions",true)], c4ok,
+    `الـ Gross مظبوط: A.V (${av}) × ${trn} = ${f2(av*trn)} قريب من ${gr} ✓`,
+    `الـ Gross اتظبط بالمعادلة — اتأكد منه من الإيصال`,
+    `الـ Gross (${gr}) مش قريب من A.V (${av}) × الأوردرات (${trn}) = ${f2((av||0)*(trn||0))}. راجع Gross من الإيصال.`);
+  // C5: الضريبة في حدود طبيعية من Gross (حوالي 12%)
+  const vt=val("vat");
+  const ratio=(vt!=null&&gr)?vt/gr:null;
+  showCheck("vatCheck", [PT("vat","vat"),PT("gross","gross")], ratio!=null&&ratio>=0.105&&ratio<=0.135,
+    `الضريبة (${vt}) حوالي ${f2(ratio*100)}% من Gross ✓`,
+    `الضريبة في الحدود الطبيعية بس اتقرت بصعوبة — راجعها`,
+    `الضريبة (${vt}) مش في حدود ١٢٪ من Gross (${gr}). راجع خانة Vat.`);
+  // فيزا الشاشة: بتتقارن بفيزا التقرير، بس لو الإيصال نفسه متسق
   const box=$("visaCheck");
-  if(!merged || merged.visaSum==null){ box.className="check"; } else {
-    const v=val("visa"), r=val("rabbit"), b=val("breadfast");
-    if(v==null||r==null||b==null){ box.className="check"; } else {
-      const sum=v+r+b;
-      setCheck(box, Math.abs(sum-merged.visaSum)<=0.5,
-        `الفيزا مظبوطة: ${v} + ${r} + ${b} = ${Math.round(sum*100)/100} زي التقرير (${merged.visaSum})`,
-        `مجموع الفيزا مش مطابق: ${v} + ${r} + ${b} = ${Math.round(sum*100)/100}، والتقرير بيقول ${merged.visaSum}. راجع خانة VISA غالبا.`);
-    }
+  const v=val("visa"), r=val("rabbit"), b=val("breadfast");
+  if(vs0==null){ box.className="check"; }
+  else if(!c1Live && vs0!=null && nc!=null && pp!=null && gwd!=null){ box.className="check bad"; box.textContent="⚠️ فيزا التقرير نفسها مش مؤكدة (الإيصال مش متسق فوق) — متعتمدش على خانة VISA دلوقتي، صلّح الإيصال الأول."; }
+  else {
+    const parts=[PT("visa","visa"),PT("rabbit","rabbit"),PT("breadfast","breadfast")];
+    const ok=(v!=null&&r!=null&&b!=null) ? Math.abs(v+r+b-vs0)<=0.5 : false;
+    showCheck("visaCheck", parts, ok,
+      `الفيزا مظبوطة: ${v} + ${r} + ${b} = ${f2(v+r+b)} زي التقرير (${vs0})`,
+      `مجموع الفيزا مطابق بعد تصحيح/اشتقاق آلي — راجع الخانات البرتقالية كويس`,
+      `مجموع الفيزا مش مطابق: ${v} + ${r} + ${b} = ${f2((v||0)+(r||0)+(b||0))}، والتقرير بيقول ${vs0}. راجع خانة VISA غالبا.`);
   }
-  const t=$("totalCheck");
-  const di=val("diin"), hd=val("hd"), gnd=val("grossNoDisc");
-  if(di==null||hd==null||gnd==null){ t.className="check"; } else {
-    setCheck(t, Math.abs(di+hd-gnd)<=1.5,
-      `Di.in + H.D = ${Math.round((di+hd)*100)/100} زي Gross without disc ✓`,
-      `Di.in (${di}) + H.D (${hd}) = ${Math.round((di+hd)*100)/100}، ومش بتساوي Gross without disc (${gnd}). راجع الخانتين.`);
-  }
-  const c=$("countCheck");
-  const dn=cnt("diin"), hn=cnt("hd"), tr=cnt("netCash");
-  if(dn==null||hn==null||tr==null){ c.className="check"; } else {
-    setCheck(c, dn+hn===tr,
-      `عدد الأوردرات مظبوط: ${dn} + ${hn} = ${tr} ✓`,
-      `أوردرات Di.in (${dn}) + H.D (${hn}) = ${dn+hn}، وعدد الأوردرات الكلي ${tr}. راجع الأعداد.`);
-  }
+  // C2: Di.in + H.D = Gross without disc
+  const di=val("diin"), hd=val("hd");
+  const c2ok=(di!=null&&hd!=null&&gwd!=null) ? Math.abs(di+hd-gwd)<=1.5 : false;
+  showCheck("totalCheck", [PT("diin","diin"),PT("hd","hd"),PT("grossNoDisc","grossNoDisc")], c2ok,
+    `Di.in + H.D = ${f2(di+hd)} زي Gross without disc ✓`,
+    `Di.in + H.D مطابق بعد تصحيح آلي — راجع الخانات البرتقالية`,
+    `Di.in (${di}) + H.D (${hd}) = ${f2((di||0)+(hd||0))}، ومش بتساوي Gross without disc (${gwd}). راجع الخانتين.`);
+  // C3: أعداد الأوردرات
+  const dn=cnt("diin"), hn=cnt("hd");
+  const c3ok=(dn!=null&&hn!=null&&trn!=null) ? dn+hn===trn : false;
+  showCheck("countCheck", [PT("diin","diinN",true),PT("hd","hdN",true),PT("netCash","transactions",true)], c3ok,
+    `عدد الأوردرات مظبوط: ${dn} + ${hn} = ${trn} ✓`,
+    `أعداد الأوردرات مطابقة بعد اشتقاق آلي — راجعها`,
+    `أوردرات Di.in (${dn}) + H.D (${hn}) = ${(dn||0)+(hn||0)}، وعدد الأوردرات الكلي ${trn}. راجع الأعداد.`);
 }
 
 /* ---------- outputs ---------- */
@@ -725,76 +856,178 @@ async function geometryRead(worker, canvas, allRows, targets){
 function Pnums(text){ return numsIn(norm(text).replace(/[^\d.,\- ]/g," ")); }
 function Pjoin(nums){ return joinAmount(nums); }
 
+/* ---------- قراءة جوجل الذكية (Gemini) ---------- */
+async function fileToB64(f){
+  const buf=await f.arrayBuffer();
+  const bytes=new Uint8Array(buf);
+  let bin=""; const CH=0x8000;
+  for(let i=0;i<bytes.length;i+=CH) bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH));
+  return btoa(bin);
+}
+const GEMINI_MODELS=["gemini-2.5-flash","gemini-2.0-flash","gemini-2.5-flash-lite"];
+async function geminiRead(key){
+  const [b64e,b64l]=await Promise.all([fileToB64(imgs.eod), fileToB64(imgs.live)]);
+  const prompt=[
+    "Two photos from one restaurant branch at closing time.",
+    "Photo 1 is the end-of-day receipt (Summary Statements). Photo 2 is a phone photo of the Summary Sales screen on the POS.",
+    "Extract the numbers exactly as printed. Use null for anything not visible or not readable. Amounts keep their decimals. Counts are integers.",
+    "From photo 1 (receipt): gross (Gross Sales), gross_without_disc (Gross Without Disc), net_cash (Net Cash), transactions (Transactions), average_check (Average Check), vat (VAT), prepaid_amount and prepaid_count (C.CURRENCY row), visa_orders_total (the printed total of the VISA ORDERS section), togo_amount and togo_count (TO-GO AMOUNT and its #), delivery_amount and delivery_count (DELIVERY AMOUNT and its #), branch_name (the branch name printed near the top).",
+    "From photo 2 (screen): screen_visa (Visa row amount), screen_master (Master row amount), screen_dinners (Dinners row amount), screen_carryout_amount and screen_carryout_count (Carry Out row), screen_carservice_amount and screen_carservice_count (Car Service row).",
+    "Return only JSON."
+  ].join("\n");
+  const props={};
+  for(const k of ["gross","gross_without_disc","net_cash","average_check","vat","prepaid_amount","visa_orders_total","togo_amount","delivery_amount","screen_visa","screen_master","screen_dinners","screen_carryout_amount","screen_carservice_amount"]) props[k]={type:"NUMBER",nullable:true};
+  for(const k of ["transactions","prepaid_count","togo_count","delivery_count","screen_carryout_count","screen_carservice_count"]) props[k]={type:"INTEGER",nullable:true};
+  props.branch_name={type:"STRING",nullable:true};
+  const body={
+    contents:[{parts:[
+      {text:prompt},
+      {inline_data:{mime_type:imgs.eod.type||"image/jpeg", data:b64e}},
+      {inline_data:{mime_type:imgs.live.type||"image/jpeg", data:b64l}},
+    ]}],
+    generationConfig:{ temperature:0, response_mime_type:"application/json", response_schema:{type:"OBJECT", properties:props} },
+  };
+  let res=null, lastErr=null;
+  for(const model of GEMINI_MODELS){
+    const url="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+encodeURIComponent(key);
+    res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(res.ok){ diagPush("gemini model: "+model); break; }
+    if(res.status===404){ lastErr=res; continue; } // الموديل مش متاح للمفتاح ده: جرب اللي بعده
+    const err=new Error("gemini http "+res.status); err.status=res.status;
+    try{ err.detail=(await res.text()).slice(0,250); }catch(_){}
+    throw err;
+  }
+  if(!res || !res.ok){ const err=new Error("gemini: no available model"); err.status=404; throw err; }
+  const j=await res.json();
+  const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
+  const txt=parts.map(p=>p.text||"").join("");
+  if(!txt){ const err=new Error("gemini: empty or blocked response"); err.status=0; throw err; }
+  const d=JSON.parse(txt);
+  const num=(x)=>typeof x==="number"&&isFinite(x)?x:null;
+  const int=(x)=>{const n=num(x); return n==null?null:Math.round(n);};
+  const MC=90;
+  const eod={gross:num(d.gross), grossNoDisc:num(d.gross_without_disc), netCash:num(d.net_cash), transactions:int(d.transactions),
+    av:num(d.average_check), vat:num(d.vat), prepaid:num(d.prepaid_amount), prepaidN:int(d.prepaid_count),
+    visaSum:num(d.visa_orders_total), togo:num(d.togo_amount), togoN:int(d.togo_count),
+    delivery:num(d.delivery_amount), deliveryN:int(d.delivery_count),
+    headerBranch:typeof d.branch_name==="string"&&d.branch_name.trim()?d.branch_name.trim():null, _conf:{}};
+  for(const k of ["gross","grossNoDisc","netCash","transactions","av","vat","prepaid","prepaidN","togo","togoN","delivery","deliveryN","visaSum"]) eod._conf[k]=eod[k]!=null?MC:0;
+  const live={visa:num(d.screen_visa), master:num(d.screen_master), dinners:num(d.screen_dinners),
+    carryOut:num(d.screen_carryout_amount), carryOutN:int(d.screen_carryout_count),
+    carService:num(d.screen_carservice_amount), carServiceN:int(d.screen_carservice_count), _conf:{}};
+  for(const k of ["visa","master","dinners","carryOut","carryOutN","carService","carServiceN"]) live._conf[k]=live[k]!=null?MC:0;
+  diagPush("gemini raw: "+JSON.stringify(d).slice(0,500));
+  return {eod, live};
+}
+
+/* ---------- بعد القراءة: ثقة الإيصال، دمج، تصحيح بالمعادلات، عرض ---------- */
+function finishRead(eod, live, how){
+  // لو الإيصال مش متسق داخليا: مفيش مرجع موثوق للفيزا — علّم خانات الشاشة للمراجعة اليدوية
+  if(!eod._c1ok){ for(const k of ["visa","master","dinners"]) live._conf[k]=Math.min(live._conf[k]||99,55); }
+  merged=mergeAll(eod, live);
+  const fx=equationFix(merged);
+  if(fx.length) diagPush("corrected: "+fx.join(" | "));
+  // صورة اضطررنا نصحّح فيها رقم = الصورة كلها مش موثوقة: كل خانات الإيصال تتعلم للمراجعة
+  if(merged._rcFixed){
+    for(const k of ["gross","grossNoDisc","netCash","transactions","av","vat","prepaid","prepaidN","diin","diinN","hd","hdN"]) merged._conf[k]=Math.min(merged._conf[k]||0,55);
+    diagPush("photo flagged: receipt needed corrections, all receipt fields marked for review");
+  }
+  if(merged.headerBranch && !$("branch").value.trim()){
+    const hs=squash(merged.headerBranch);
+    const found=BRANCHES.find(b=>hs.startsWith(squash(b))||squash(b).startsWith(hs));
+    if(found){ $("branch").value=found; localStorage.setItem("df_branch",found); }
+  }
+  fillTable();
+  const miss=FIELDS.filter(f=>f.v(merged)==null).map(f=>f.name);
+  if(miss.length) $("status").textContent="راجع الأرقام تحت 👇 الخانات الفاضية اكتبها بإيدك من الشاشة.";
+  else if(!$("status").textContent.includes("بصعوبة")) $("status").textContent="راجع الأرقام تحت 👇";
+}
+
 $("go").addEventListener("click", async ()=>{
   try{
     $("go").disabled=true;
     DIAG.length=0;
-    diagPush("v3 | "+navigator.userAgent.slice(0,120));
+    diagPush("v4 | "+navigator.userAgent.slice(0,120));
     $("status").textContent="بنجهز الصور…";
-    const [decE,decL]=await Promise.all([decodeFile(imgs.eod), decodeFile(imgs.live)]);
-    diagPush(`receipt: ${decE.w}x${decE.h} (${decE.how}) | screen: ${decL.w}x${decL.h} (${decL.how})`);
-    const cE=prepCanvas(decE,false,0);
-    const cL1=prepCanvas(decL,false,0);
-    const cL2=prepCanvas(decL,true,0);
-    diagPush(`canvas receipt: ${cE.width}x${cE.height} | screen: ${cL1.width}x${cL1.height}`);
-    const worker=await getWorker();
-    // التقرير: محاولة واحدة كفاية
-    const eodRes=await ocrRows(worker, cE, "6");
-    $("txtEod").value=eodRes.text.trim();
-    const eod=parseEod(eodRes.rows);
-    // الشاشة: محاولات قراءة متعددة + دمج
-    const passes=[]; const liveRowSets=[];
-    const p1=await ocrRows(worker, cL1, "6"); passes.push(parseLive(p1.rows)); liveRowSets.push({rows:p1.rows, canvas:cL1});
-    $("txtLive").value=p1.text.trim();
-    diagPush("pass A: "+passStr(passes[0]));
-    const p2=await ocrRows(worker, cL2, "6"); passes.push(parseLive(p2.rows)); liveRowSets.push({rows:p2.rows, canvas:cL2});
-    diagPush("pass B: "+passStr(passes[1]));
-    const p4=await ocrRows(worker, cL1, "11"); passes.push(parseLive(p4.rows)); liveRowSets.push({rows:p4.rows, canvas:cL1});
-    diagPush("pass D: "+passStr(passes[2]));
-    // محاولة الصورة المدوّرة (الاتجاهين): بس لو الصورة مقلوبة فعلا (عرضية) أو القراءات كلها فشلت، عشان منضيعش وقت الموبايل
-    const foundAny=passes.some(p=>p.visa!=null||p.master!=null||p.dinners!=null);
-    if(decL.w>decL.h || !foundAny){
-      for(const rot of [1,-1]){
-        const cL3=prepCanvas(decL,false,rot);
-        const p3=await ocrRows(worker, cL3, "6"); passes.push(parseLive(p3.rows)); liveRowSets.push({rows:p3.rows, canvas:cL3});
-        diagPush("pass C(rot"+rot+"): "+passStr(passes[passes.length-1]));
-        const got=passes[passes.length-1];
-        if(got.visa!=null||got.master!=null||got.dinners!=null) break; // لقينا قراءة كويسة، بلاش الاتجاه التاني
+    let eod=null, live=null, how="";
+    const key=($( "gkey" ).value||"").trim();
+    if(key){
+      try{
+        $("status").textContent="جوجل بيقرا الصورتين…";
+        const g=await geminiRead(key);
+        eod=g.eod; how="gemini";
+        const rt=receiptTrust(eod);
+        if(rt.length) diagPush("receipt fixed: "+rt.join(" | "));
+        diagPush(`trust: c1=${eod._c1ok} c4=${eod._c4ok}`);
+        live=pickLive([g.live], eod._c1ok?eod.visaSum:null);
+        if(live._note) diagPush("chosen: "+passStr(live)+" | fixed: "+live._note);
+      }catch(e){
+        diagPush("gemini ERROR: "+String(e.status||"")+" "+String(e.detail||e.message||e).slice(0,200));
+        eod=null;
+        if(e.status===400||e.status===403){ $("status").textContent="مفتاح جوجل مش شغال. اتأكد منه، أو امسحه واستخدم القراءة المحلية."; return; }
+        $("status").textContent=(e.status===429)?"حصة جوجل المجانية خلصت مؤقتا — بنكمّل بالقراءة المحلية…":"مفيش نت أو جوجل مش متاح — بنكمّل بالقراءة المحلية…";
       }
-    } else diagPush("pass C(rot): skipped");
-    // القراءة بالموقع كمرشح إضافي لو فيه بند ناقص من كل المحاولات
-    const needGeo=["visa","master","dinners"].some(k=>passes.every(p=>p[k]==null));
-    if(needGeo){
-      // اقرأ بالموقع على أنجح محاولة (اللي لقت أكتر بنود) وعلى الـ canvas بتاعها بالذات
-      let bi=0, bs=-1;
-      passes.forEach((p,i)=>{ const s=["visa","master","dinners","carryOut","carService"].filter(k=>p[k]!=null).length; if(s>bs){bs=s;bi=i;} });
-      const src=liveRowSets[bi];
-      const geo=await geometryRead(worker, src.canvas, src.rows, [
-        {key:"visa",idx:9},{key:"master",idx:10},{key:"dinners",idx:11},{key:"carryOut",idx:0},
-      ]);
-      if(Object.keys(geo).length){
-        const gp={visa:null,master:null,dinners:null,carryOut:null,carryOutN:null,carService:null,carServiceN:null,_conf:{}};
-        for(const k of Object.keys(geo)){
-          if(geo[k].v>0 && geo[k].v<500000){ gp[k]=geo[k].v; gp._conf[k]=geo[k].conf; }
+    }
+    if(!eod){
+      how="tesseract";
+      const [decE,decL]=await Promise.all([decodeFile(imgs.eod), decodeFile(imgs.live)]);
+      diagPush(`receipt: ${decE.w}x${decE.h} (${decE.how}) | screen: ${decL.w}x${decL.h} (${decL.how})`);
+      const cE=prepCanvas(decE,false,0);
+      const cL1=prepCanvas(decL,false,0);
+      const cL2=prepCanvas(decL,true,0);
+      diagPush(`canvas receipt: ${cE.width}x${cE.height} | screen: ${cL1.width}x${cL1.height}`);
+      const worker=await getWorker();
+      // التقرير: محاولة واحدة كفاية
+      const eodRes=await ocrRows(worker, cE, "6");
+      $("txtEod").value=eodRes.text.trim();
+      eod=parseEod(eodRes.rows);
+      const rt=receiptTrust(eod);
+      if(rt.length) diagPush("receipt fixed: "+rt.join(" | "));
+      diagPush(`trust: c1=${eod._c1ok} c4=${eod._c4ok}`);
+      // الشاشة: محاولات قراءة متعددة + دمج
+      const passes=[]; const liveRowSets=[];
+      const p1=await ocrRows(worker, cL1, "6"); passes.push(parseLive(p1.rows)); liveRowSets.push({rows:p1.rows, canvas:cL1});
+      $("txtLive").value=p1.text.trim();
+      diagPush("pass A: "+passStr(passes[0]));
+      const p2=await ocrRows(worker, cL2, "6"); passes.push(parseLive(p2.rows)); liveRowSets.push({rows:p2.rows, canvas:cL2});
+      diagPush("pass B: "+passStr(passes[1]));
+      const p4=await ocrRows(worker, cL1, "11"); passes.push(parseLive(p4.rows)); liveRowSets.push({rows:p4.rows, canvas:cL1});
+      diagPush("pass D: "+passStr(passes[2]));
+      // محاولة الصورة المدوّرة (الاتجاهين): بس لو الصورة مقلوبة فعلا (عرضية) أو القراءات كلها فشلت، عشان منضيعش وقت الموبايل
+      const foundAny=passes.some(p=>p.visa!=null||p.master!=null||p.dinners!=null);
+      if(decL.w>decL.h || !foundAny){
+        for(const rot of [1,-1]){
+          const cL3=prepCanvas(decL,false,rot);
+          const p3=await ocrRows(worker, cL3, "6"); passes.push(parseLive(p3.rows)); liveRowSets.push({rows:p3.rows, canvas:cL3});
+          diagPush("pass C(rot"+rot+"): "+passStr(passes[passes.length-1]));
+          const got=passes[passes.length-1];
+          if(got.visa!=null||got.master!=null||got.dinners!=null) break;
         }
-        passes.push(gp);
-        diagPush("geometry: "+JSON.stringify(geo));
+      } else diagPush("pass C(rot): skipped");
+      // القراءة بالموقع كمرشح إضافي لو فيه بند ناقص من كل المحاولات
+      const needGeo=["visa","master","dinners"].some(k=>passes.every(p=>p[k]==null));
+      if(needGeo){
+        let bi=0, bs=-1;
+        passes.forEach((p,i)=>{ const s=["visa","master","dinners","carryOut","carService"].filter(k=>p[k]!=null).length; if(s>bs){bs=s;bi=i;} });
+        const src=liveRowSets[bi];
+        const geo=await geometryRead(worker, src.canvas, src.rows, [
+          {key:"visa",idx:9},{key:"master",idx:10},{key:"dinners",idx:11},{key:"carryOut",idx:0},
+        ]);
+        if(Object.keys(geo).length){
+          const gp={visa:null,master:null,dinners:null,carryOut:null,carryOutN:null,carService:null,carServiceN:null,_conf:{}};
+          for(const k of Object.keys(geo)){
+            if(geo[k].v>0 && geo[k].v<500000){ gp[k]=geo[k].v; gp._conf[k]=geo[k].conf; }
+          }
+          passes.push(gp);
+          diagPush("geometry: "+JSON.stringify(geo));
+        }
       }
+      // ممنوع نستخدم فيزا التقرير كمرجع للتصحيح إلا لو الإيصال عدّى معادلة الاتساق المستقلة
+      live=pickLive(passes, eod._c1ok?eod.visaSum:null);
+      diagPush("chosen: "+passStr(live)+(live._note?" | fixed: "+live._note:""));
     }
-    let live=pickLive(passes, eod.visaSum);
-    diagPush("chosen: "+passStr(live)+(live._note?" | fixed: "+live._note:""));
-    merged=mergeAll(eod, live);
-    const fx=equationFix(merged);
-    if(fx.length) diagPush("corrected: "+fx.join(" | "));
-    if(merged.headerBranch && !$("branch").value.trim()){
-      const hs=squash(merged.headerBranch);
-      const found=BRANCHES.find(b=>hs.startsWith(squash(b))||squash(b).startsWith(hs));
-      if(found){ $("branch").value=found; localStorage.setItem("df_branch",found); }
-    }
-    fillTable();
-    const miss=FIELDS.filter(f=>f.v(merged)==null).map(f=>f.name);
-    if(miss.length) $("status").textContent="راجع الأرقام تحت 👇 الخانات الفاضية اكتبها بإيدك من الشاشة.";
-    else if(!$("status").textContent.includes("بصعوبة")) $("status").textContent="راجع الأرقام تحت 👇";
+    diagPush("reader: "+how);
+    finishRead(eod, live, how);
   }catch(e){
     diagPush("ERROR: "+String(e&&e.message||e).slice(0,150));
     $("status").textContent="حصلت مشكلة في القراءة. جرب الصق النص من الملخص تحت.";
@@ -803,10 +1036,13 @@ $("go").addEventListener("click", async ()=>{
     $("prog").style.display="none";
   }
 });
+// hook للاختبار الآلي
+window.__dfTest=(eod,live)=>{ const rt=receiptTrust(eod); if(rt.length) diagPush("receipt fixed: "+rt.join(" | ")); const l2=pickLive([live], eod._c1ok?eod.visaSum:null); diagPush("chosen: "+passStr(l2)+(l2._note?" | fixed: "+l2._note:"")); finishRead(eod,l2,"test"); };
 function passStr(p){ return ["visa","master","dinners","carryOut","carService"].map(k=>k+"="+(p[k]==null?"-":p[k])).join(" "); }
 $("goTxt").addEventListener("click", ()=>{
   const p1=parsePasted($("txtEod").value);
   const p2=parsePasted($("txtLive").value);
+  receiptTrust(p1.eod, false); // من غير تصحيح: بس نحسب الثقة، النص الملصوق إدخال اليوزر
   merged=mergeAll(p1.eod, p2.live);
   fillTable();
 });
