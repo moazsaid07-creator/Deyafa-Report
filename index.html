@@ -65,7 +65,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>تقرير ضيافة اليومي <span style="font-size:11px;color:var(--dim)">v4</span></h1>
+  <h1>تقرير ضيافة اليومي <span style="font-size:11px;color:var(--dim)">v4.2</span></h1>
   <div class="sub">ارفع صورة تقرير نهاية اليوم وصورة شاشة Summary Sales، راجع الأرقام، وانسخ التقرير جاهز.</div>
 
   <div class="card">
@@ -105,7 +105,7 @@
     <details>
       <summary>مفتاح جوجل للقراءة الذكية (بيتحفظ على موبايلك بس، مش بيتبعت لحد)</summary>
       <label>Google AI Studio key</label>
-      <input type="text" id="gkey" placeholder="AIza..." autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid var(--line);background:#11181f;color:var(--txt);direction:ltr;text-align:left;font-family:monospace">
+      <input type="text" id="gkey" placeholder="الصق المفتاح هنا" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid var(--line);background:#11181f;color:var(--txt);direction:ltr;text-align:left;font-family:monospace">
       <div class="tips">بالمفتاح: جوجل بيقرا الصورتين وبيستخرج الأرقام (الصور بتروح لجوجل). من غيره: قراءة محلية على الموبايل، أضعف مع الميل والإضاءة. في الحالتين فيه معادلات بتكشف أي رقم غلط تحت.</div>
     </details>
     <button class="main" id="go" disabled>اطلع الأرقام من الصور</button>
@@ -128,6 +128,7 @@
 
   <div class="card" id="resCard" style="display:none">
     <h2>٣) راجع الأرقام وعدل لو فيه غلطة</h2>
+    <div class="check" id="readerNote"></div>
     <table id="tbl">
       <thead><tr><th>الخانة</th><th>المبلغ</th><th>العدد</th></tr></thead>
       <tbody></tbody>
@@ -864,7 +865,10 @@ async function fileToB64(f){
   for(let i=0;i<bytes.length;i+=CH) bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH));
   return btoa(bin);
 }
-const GEMINI_MODELS=["gemini-2.5-flash","gemini-2.0-flash","gemini-2.5-flash-lite"];
+// أسماء احتياطية من توثيق جوجل الحالي (نوفمبر 2026): gemini-3.5-flash مستقر، وgemini-3.1-flash-lite، والأسماء القديمة 2.x مقيدة/متوقفة للمفاتيح الجديدة
+const GEMINI_MODELS=["gemini-3.5-flash","gemini-flash-latest","gemini-3.1-flash-lite","gemini-3-flash-preview","gemini-2.5-flash","gemini-2.5-flash-lite"];
+// المصادقة بالهيدر x-goog-api-key زي توثيق جوجل، وبتشتغل مع صيغة المفاتيح الجديدة (AQ...)
+const GHEADERS=(key)=>({"Content-Type":"application/json","x-goog-api-key":key});
 async function geminiRead(key){
   const [b64e,b64l]=await Promise.all([fileToB64(imgs.eod), fileToB64(imgs.live)]);
   const prompt=[
@@ -882,17 +886,36 @@ async function geminiRead(key){
   const body={
     contents:[{parts:[
       {text:prompt},
-      {inline_data:{mime_type:imgs.eod.type||"image/jpeg", data:b64e}},
-      {inline_data:{mime_type:imgs.live.type||"image/jpeg", data:b64l}},
+      {inlineData:{mime_type:imgs.eod.type||"image/jpeg", data:b64e}},
+      {inlineData:{mime_type:imgs.live.type||"image/jpeg", data:b64l}},
     ]}],
-    generationConfig:{ temperature:0, response_mime_type:"application/json", response_schema:{type:"OBJECT", properties:props} },
+    generationConfig:{ temperature:0, responseMimeType:"application/json", responseSchema:{type:"OBJECT", properties:props} },
   };
-  let res=null, lastErr=null;
-  for(const model of GEMINI_MODELS){
-    const url="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+encodeURIComponent(key);
-    res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  // الأول اكتشاف حي بالمفتاح نفسه: هات الموديلات المتاحة واختار أحدث flash بتدعم generateContent وصور.
+  // لو الاكتشاف فشل (نت/صلاحية) نكمّل بالأسماء الاحتياطية فوق.
+  const badId=(id)=>/tts|live|image|banana|omni|robotics|computer-use|embedding|aqa|pro/i.test(id);
+  const scoreId=(id)=>{ let s=0; if(/preview/i.test(id))s+=10; if(/lite/i.test(id))s+=5; const m=id.match(/(\d+(?:\.\d+)?)/); s+=m?100-parseFloat(m[1])*10:70; return s; };
+  const listFlashModels=async()=>{
+    try{
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",{headers:GHEADERS(key)});
+      if(!r.ok){ diagPush("models.list http "+r.status); return []; }
+      const j=await r.json();
+      return (j.models||[])
+        .filter(m=>((m.supportedGenerationMethods)||[]).includes("generateContent"))
+        .map(m=>String(m.name||"").replace(/^models\//,""))
+        .filter(id=>/flash/i.test(id) && !badId(id))
+        .sort((a,b)=>scoreId(a)-scoreId(b));
+    }catch(_){ return []; }
+  };
+  let list=await listFlashModels();
+  diagPush("models available: "+(list.length?list.join(", "):"(list failed, using backup names)"));
+  for(const m of GEMINI_MODELS) if(!list.includes(m)) list.push(m);
+  let res=null;
+  for(const model of list){
+    const url="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent";
+    res=await fetch(url,{method:"POST",headers:GHEADERS(key),body:JSON.stringify(body)});
     if(res.ok){ diagPush("gemini model: "+model); break; }
-    if(res.status===404){ lastErr=res; continue; } // الموديل مش متاح للمفتاح ده: جرب اللي بعده
+    if(res.status===404) continue; // الموديل مش متاح للمفتاح ده: جرب اللي بعده
     const err=new Error("gemini http "+res.status); err.status=res.status;
     try{ err.detail=(await res.text()).slice(0,250); }catch(_){}
     throw err;
@@ -922,6 +945,9 @@ async function geminiRead(key){
 
 /* ---------- بعد القراءة: ثقة الإيصال، دمج، تصحيح بالمعادلات، عرض ---------- */
 function finishRead(eod, live, how){
+  const rn=$("readerNote");
+  if(readerNoteText){ rn.textContent="🟡 "+readerNoteText; rn.className="check warn"; }
+  else { rn.className="check"; rn.textContent=""; }
   // لو الإيصال مش متسق داخليا: مفيش مرجع موثوق للفيزا — علّم خانات الشاشة للمراجعة اليدوية
   if(!eod._c1ok){ for(const k of ["visa","master","dinners"]) live._conf[k]=Math.min(live._conf[k]||99,55); }
   merged=mergeAll(eod, live);
@@ -943,11 +969,13 @@ function finishRead(eod, live, how){
   else if(!$("status").textContent.includes("بصعوبة")) $("status").textContent="راجع الأرقام تحت 👇";
 }
 
+let readerNoteText=""; // سبب فشل القراءة الذكية لو حصل: يتعرض فوق الجدول بشكل واضح
 $("go").addEventListener("click", async ()=>{
   try{
     $("go").disabled=true;
+    readerNoteText="";
     DIAG.length=0;
-    diagPush("v4 | "+navigator.userAgent.slice(0,120));
+    diagPush("v4.2 | "+navigator.userAgent.slice(0,120));
     $("status").textContent="بنجهز الصور…";
     let eod=null, live=null, how="";
     const key=($( "gkey" ).value||"").trim();
@@ -965,7 +993,9 @@ $("go").addEventListener("click", async ()=>{
         diagPush("gemini ERROR: "+String(e.status||"")+" "+String(e.detail||e.message||e).slice(0,200));
         eod=null;
         if(e.status===400||e.status===403){ $("status").textContent="مفتاح جوجل مش شغال. اتأكد منه، أو امسحه واستخدم القراءة المحلية."; return; }
-        $("status").textContent=(e.status===429)?"حصة جوجل المجانية خلصت مؤقتا — بنكمّل بالقراءة المحلية…":"مفيش نت أو جوجل مش متاح — بنكمّل بالقراءة المحلية…";
+        const why=(e.status===429)?"حصة جوجل المجانية خلصت مؤقتا":(e.status===404)?"موديل القراءة مش متاح للمفتاح ده":(!e.status)?"مفيش نت أو جوجل مش متاح دلوقتي":"خطأ من جوجل ("+e.status+")";
+        readerNoteText="القراءة الذكية بجوجل مكملتش: "+why+" — الأرقام دي من القراءة المحلية على الموبايل، راجعها كلها كويس.";
+        $("status").textContent=why+" — بنكمّل بالقراءة المحلية…";
       }
     }
     if(!eod){
